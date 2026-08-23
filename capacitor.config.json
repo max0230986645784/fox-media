@@ -1,0 +1,8 @@
+{
+  "appId": "app.foxmedia.player",
+  "appName": "Fox Media",
+  "webDir": "dist",
+  "android": {
+    "allowMixedContent": false
+  }
+}

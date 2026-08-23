@@ -1,0 +1,11 @@
+{
+  "buildCommand": "npm run site",
+  "outputDirectory": "public-site",
+  "cleanUrls": true,
+  "headers": [
+    {
+      "source": "/app/sw.js",
+      "headers": [{ "key": "Cache-Control", "value": "no-cache" }]
+    }
+  ]
+}

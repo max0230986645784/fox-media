@@ -1,0 +1,548 @@
+<!doctype html>
+<html lang="fr">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Fox Media — tes films, séries et musiques dans un seul lecteur</title>
+    <meta
+      name="description"
+      content="Fox Media lit les films, séries et musiques déjà présents sur ton téléphone ou ton PC. Tu choisis ce que tu ajoutes, tu corriges les titres, artistes et pochettes. 1 € à vie, gratuit pour les 100 premiers."
+    />
+    <link rel="icon" type="image/png" href="favicon.png" />
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="Fox Media 🦊" />
+    <meta
+      property="og:description"
+      content="Tes films, séries et musiques de ton téléphone dans un seul lecteur. 1 € à vie."
+    />
+    <meta property="og:image" content="icon-512.png" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <style>
+      :root {
+        --bg: #0b0e14;
+        --panel: #141924;
+        --line: #232a38;
+        --text: #f2f5fb;
+        --muted: #9aa4b8;
+        --accent: #ff7a1a;
+        --accent-2: #ff3d6e;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        background:
+          radial-gradient(1000px 500px at 15% -10%, rgba(255, 122, 26, 0.22), transparent),
+          radial-gradient(900px 500px at 95% 0%, rgba(255, 61, 110, 0.16), transparent),
+          var(--bg);
+        color: var(--text);
+        font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+        line-height: 1.55;
+      }
+
+      .wrap {
+        max-width: 1040px;
+        margin: 0 auto;
+        padding: 28px 20px 72px;
+      }
+
+      header {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+      }
+
+      header img {
+        width: 46px;
+        height: 46px;
+        border-radius: 14px;
+      }
+
+      header b {
+        font-size: 22px;
+      }
+
+      header b span {
+        color: var(--accent);
+      }
+
+      .hero {
+        display: grid;
+        grid-template-columns: 1.05fr 0.95fr;
+        gap: 36px;
+        align-items: center;
+        margin-top: 44px;
+      }
+
+      h1 {
+        font-size: clamp(32px, 5vw, 54px);
+        line-height: 1.05;
+        margin: 0 0 14px;
+      }
+
+      h1 em {
+        font-style: normal;
+        background: linear-gradient(120deg, var(--accent), var(--accent-2));
+        -webkit-background-clip: text;
+        background-clip: text;
+        color: transparent;
+      }
+
+      .lead {
+        color: var(--muted);
+        font-size: 18px;
+        margin: 0 0 24px;
+      }
+
+      .cta {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 12px;
+      }
+
+      .btn {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        padding: 13px 20px;
+        border-radius: 999px;
+        border: 1px solid var(--line);
+        background: var(--panel);
+        color: var(--text);
+        font-weight: 600;
+        font-size: 15px;
+        text-decoration: none;
+        cursor: pointer;
+      }
+
+      .btn.primary {
+        background: linear-gradient(120deg, var(--accent), var(--accent-2));
+        border-color: transparent;
+        color: #1a1005;
+      }
+
+      .badge {
+        display: inline-block;
+        margin-bottom: 16px;
+        padding: 6px 12px;
+        border-radius: 999px;
+        border: 1px solid var(--accent);
+        background: rgba(255, 122, 26, 0.14);
+        color: var(--accent);
+        font-size: 13px;
+        font-weight: 600;
+      }
+
+      .shot {
+        border: 1px solid var(--line);
+        border-radius: 18px;
+        background: var(--panel);
+        overflow: hidden;
+        box-shadow: 0 30px 70px rgba(0, 0, 0, 0.5);
+      }
+
+      .shot img {
+        display: block;
+        width: 100%;
+      }
+
+      .grid {
+        margin-top: 72px;
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+        gap: 18px;
+      }
+
+      .card {
+        border: 1px solid var(--line);
+        border-radius: 16px;
+        background: var(--panel);
+        padding: 20px;
+      }
+
+      .card h3 {
+        margin: 0 0 8px;
+        font-size: 17px;
+      }
+
+      .card p {
+        margin: 0;
+        color: var(--muted);
+        font-size: 14px;
+      }
+
+      .steps {
+        margin-top: 56px;
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+        gap: 18px;
+        counter-reset: step;
+      }
+
+      .step {
+        border-left: 3px solid var(--accent);
+        padding-left: 14px;
+      }
+
+      .step b {
+        display: block;
+        color: var(--accent);
+        font-size: 13px;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+
+      .plans {
+        list-style: none;
+        margin: 0;
+        padding: 0;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+      }
+
+      .plans li {
+        border: 1px solid var(--line);
+        border-radius: 999px;
+        padding: 8px 14px;
+        font-size: 14px;
+      }
+
+      .price {
+        margin-top: 64px;
+        border: 1px solid var(--line);
+        border-radius: 20px;
+        background: var(--panel);
+        padding: 28px;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 22px;
+        align-items: center;
+        justify-content: space-between;
+      }
+
+      .price h2 {
+        margin: 0 0 6px;
+        font-size: 26px;
+      }
+
+      .price p {
+        margin: 0;
+        color: var(--muted);
+        font-size: 14px;
+      }
+
+      .ref {
+        margin-top: 18px;
+        color: var(--muted);
+        font-size: 13px;
+      }
+
+      footer {
+        margin-top: 64px;
+        color: var(--muted);
+        font-size: 13px;
+        border-top: 1px solid var(--line);
+        padding-top: 18px;
+      }
+
+      .ads {
+        margin-top: 48px;
+      }
+
+      .ads-house {
+        padding: 22px;
+        border: 1px dashed rgba(255, 122, 26, 0.45);
+        border-radius: 16px;
+        background: rgba(255, 122, 26, 0.07);
+        color: var(--muted);
+        text-align: center;
+        font-size: 14px;
+      }
+
+      .ads-house strong {
+        color: #ff7a1a;
+        font-size: 18px;
+      }
+
+      @media (max-width: 860px) {
+        .hero {
+          grid-template-columns: 1fr;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <header>
+        <img src="icon-192.png" alt="Logo Fox Media" />
+        <b>Fox<span>Media</span></b>
+      </header>
+
+      <section class="hero">
+        <div>
+          <span class="badge" id="offer">Gratuit pour les 100 premières installations</span>
+          <h1>Tes films, séries et musiques <em>déjà sur ton téléphone</em>, dans un seul lecteur.</h1>
+          <p class="lead">
+            Fox Media scanne ton téléphone ou ton PC, tu choisis ce que tu ajoutes, et tu corriges
+            les titres, les noms d'artistes et les pochettes qui manquent. Tout reste chez toi :
+            aucun fichier n'est envoyé sur internet.
+          </p>
+          <div class="cta">
+            <a class="btn primary" id="download" href="#telecharger">Télécharger Fox Media</a>
+            <a class="btn" id="buy" href="#acheter">Acheter ma clé — 1 €</a>
+            <button class="btn" id="share" type="button">Partager</button>
+          </div>
+          <p class="ref" id="refline"></p>
+        </div>
+        <div class="shot">
+          <img src="capture.png" alt="Fox Media en action" />
+        </div>
+      </section>
+
+      <section class="grid">
+        <div class="card">
+          <h3>Scan puis tu choisis</h3>
+          <p>Le scan liste tes vidéos et musiques, et tu coches seulement ce que tu veux voir dans l'appli.</p>
+        </div>
+        <div class="card">
+          <h3>Titres et pochettes à ton goût</h3>
+          <p>Une musique sans nom ni image ? Mets le titre, l'artiste et la pochette que tu veux.</p>
+        </div>
+        <div class="card">
+          <h3>Films, séries, musiques</h3>
+          <p>MP4, MKV, WebM, MP3, M4A, FLAC… lecture fluide, favoris, recherche et historique.</p>
+        </div>
+        <div class="card">
+          <h3>PC, Android, iPhone et tablette</h3>
+          <p>Installeur Windows, AppImage Linux, APK Android, et sur iPhone/iPad/tablette&nbsp;: ouvre l'appli dans Safari puis <b>Partager → Sur l'écran d'accueil</b>. Gratuit, sans App Store.</p>
+        </div>
+        <div class="card">
+          <h3>Rien n'est envoyé en ligne</h3>
+          <p>Tes fichiers restent sur ton appareil. Seule la sauvegarde des titres peut aller dans TON Google Drive.</p>
+        </div>
+        <div class="card">
+          <h3>Parrainage</h3>
+          <p>Invite jusqu'à 5 personnes : leur clé est gratuite, sans toucher aux 100 clés du départ.</p>
+        </div>
+      </section>
+
+      <section class="steps">
+        <div class="step"><b>Étape 1</b>Installe Fox Media sur ton PC ou ton téléphone.</div>
+        <div class="step"><b>Étape 2</b>Scanne un dossier et coche tes films et musiques.</div>
+        <div class="step"><b>Étape 3</b>Corrige les titres et pochettes, puis regarde et écoute.</div>
+      </section>
+
+      <section class="price" id="acheter">
+        <div>
+          <h2>1 € une fois, à vie</h2>
+          <p>
+            Pas d'abonnement. Les 100 premières installations reçoivent une clé gratuite, signée à
+            ton nom ou ton pseudo.
+          </p>
+        </div>
+        <a class="btn primary" id="buy2" href="#">Obtenir ma clé</a>
+      </section>
+
+      <section class="ads" aria-label="Publicité">
+        <ins
+          class="adsbygoogle"
+          style="display: block"
+          data-ad-format="auto"
+          data-full-width-responsive="true"
+        ></ins>
+        <p class="ads-house" hidden>
+          <strong>Ta pub ici</strong><br />
+          Espace partenaire Fox Media — contact :
+          <a id="ads-contact" href="#">foxmedia.pub@hotmail.com</a>
+        </p>
+      </section>
+
+      <section class="price" id="annonceurs">
+        <h2>Faire de la pub sur Fox Media</h2>
+        <p>
+          Ton encart s'affiche dans l'application et sur cette page. Plus la durée est longue, moins
+          le mois coûte cher.
+        </p>
+        <ul class="plans">
+          <li><b>1 mois</b> — 5 €</li>
+          <li><b>2 mois</b> — 9 €</li>
+          <li><b>3 mois</b> — 12 €</li>
+          <li><b>6 mois</b> — 20 €</li>
+          <li><b>12 mois</b> — 35 €</li>
+        </ul>
+        <p>
+          Pour réserver :
+          <a id="ads-contact-2" href="mailto:foxmedia.pub@hotmail.com">foxmedia.pub@hotmail.com</a>
+        </p>
+      </section>
+
+      <section class="price" id="telecharger">
+        <div>
+          <h2>Installer Fox Media</h2>
+          <p id="install-hint">On détecte ton appareil pour te donner le bon fichier.</p>
+          <div class="cta">
+            <a class="btn primary" id="install-main" href="#">Télécharger</a>
+            <a class="btn" id="install-alt" href="#">Autres appareils</a>
+          </div>
+          <ul class="plans" id="install-all">
+            <li><b>Android</b> — <a data-dl="android" href="#">fichier .apk</a></li>
+            <li><b>Windows</b> — <a data-dl="windows" href="#">installeur .exe</a></li>
+            <li><b>iPhone / iPad</b> — <a data-dl="ios" href="#">ouvrir dans Safari puis Partager → Sur l'écran d'accueil</a></li>
+            <li><b>Linux</b> — <a data-dl="linux" href="#">fichier .AppImage</a></li>
+          </ul>
+        </div>
+      </section>
+
+      <footer>
+        Fox Media ne fournit aucun film, série ni musique : l'appli lit uniquement les fichiers que
+        tu possèdes déjà sur ton appareil.
+      </footer>
+    </div>
+
+    <script>
+      // The download / buy targets and the referral code are set here so the page
+      // can be published as-is on GitHub Pages and updated in one place.
+      const CONFIG = {
+        appUrl: 'https://matheo667-rmc.github.io/fox-media/app/',
+        downloadUrl: 'https://github.com/matheo667-RMC/fox-media/releases/latest',
+        buyUrl: '',
+        // Fill both once your AdSense account is approved; empty = no ads at all.
+        adsClient: '',
+        adsSlot: '',
+        // Or paste here the invoke script URL of another network (Adsterra, A-ADS…).
+        adsScript: '',
+        adsContact: 'foxmedia.pub@hotmail.com',
+        // Direct files, so nobody has to hunt through a releases page.
+        apkUrl: '',
+        exeUrl: '',
+        appImageUrl: '',
+      };
+
+      if (CONFIG.adsScript) {
+        document.querySelector('.adsbygoogle').hidden = true;
+        const script = document.createElement('script');
+        script.src = CONFIG.adsScript;
+        script.async = true;
+        document.querySelector('.ads').append(script);
+      } else if (CONFIG.adsClient && CONFIG.adsSlot) {
+        const slot = document.querySelector('.adsbygoogle');
+        slot.dataset.adClient = CONFIG.adsClient;
+        slot.dataset.adSlot = CONFIG.adsSlot;
+        const script = document.createElement('script');
+        script.src = `https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=${CONFIG.adsClient}`;
+        script.async = true;
+        script.crossOrigin = 'anonymous';
+        document.head.append(script);
+        (window.adsbygoogle = window.adsbygoogle || []).push({});
+      } else {
+        document.querySelector('.adsbygoogle').hidden = true;
+        const house = document.querySelector('.ads-house');
+        house.hidden = false;
+        const contact = document.getElementById('ads-contact');
+        contact.textContent = CONFIG.adsContact;
+        contact.href = `mailto:${CONFIG.adsContact}`;
+      }
+
+      const params = new URLSearchParams(location.search);
+      const ref = (params.get('ref') ?? '').toUpperCase();
+      const suffix = ref ? `?ref=${encodeURIComponent(ref)}` : '';
+
+      document.getElementById('download').href = CONFIG.downloadUrl;
+      for (const id of ['buy', 'buy2']) {
+        document.getElementById(id).href = CONFIG.buyUrl || CONFIG.appUrl + suffix;
+      }
+
+      if (ref) {
+        document.getElementById('refline').textContent =
+          `Tu viens du lien de parrainage ${ref} : ta clé est gratuite.`;
+        document.getElementById('offer').textContent = 'Ta clé est gratuite avec ce lien';
+      }
+
+      // The install section shows the file matching the visitor's device.
+      const ua = navigator.userAgent;
+      const isAndroid = /Android/i.test(ua);
+      const isIos =
+        /iPhone|iPad|iPod/i.test(ua) ||
+        (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+      const isWindows = /Windows/i.test(ua);
+      const isLinux = !isAndroid && /Linux|X11/i.test(ua);
+
+      const TARGETS = {
+        android: {
+          label: 'Télécharger pour Android (.apk)',
+          hint: 'Ouvre le fichier, puis autorise l\u2019installation depuis cette source.',
+          href: CONFIG.apkUrl || CONFIG.downloadUrl,
+        },
+        windows: {
+          label: 'Télécharger pour Windows (.exe)',
+          hint: 'Windows peut afficher un avertissement : « Informations complémentaires » → « Exécuter quand même ».',
+          href: CONFIG.exeUrl || CONFIG.downloadUrl,
+        },
+        ios: {
+          label: 'Installer sur iPhone / iPad',
+          hint: 'Ouvre l\u2019appli dans Safari, puis Partager → Sur l\u2019écran d\u2019accueil. Gratuit, sans App Store.',
+          href: CONFIG.appUrl + suffix,
+        },
+        linux: {
+          label: 'Télécharger pour Linux (.AppImage)',
+          hint: 'Rends le fichier exécutable puis lance-le.',
+          href: CONFIG.appImageUrl || CONFIG.downloadUrl,
+        },
+      };
+
+      const detected = isAndroid
+        ? 'android'
+        : isIos
+          ? 'ios'
+          : isWindows
+            ? 'windows'
+            : isLinux
+              ? 'linux'
+              : null;
+
+      for (const link of document.querySelectorAll('[data-dl]')) {
+        link.href = TARGETS[link.dataset.dl].href;
+      }
+
+      const main = document.getElementById('install-main');
+      const list = document.getElementById('install-all');
+      const alt = document.getElementById('install-alt');
+      if (detected) {
+        main.textContent = TARGETS[detected].label;
+        main.href = TARGETS[detected].href;
+        document.getElementById('install-hint').textContent = TARGETS[detected].hint;
+        list.hidden = true;
+        alt.href = '#telecharger';
+        alt.addEventListener('click', (event) => {
+          event.preventDefault();
+          list.hidden = !list.hidden;
+        });
+      } else {
+        main.hidden = true;
+        alt.hidden = true;
+      }
+
+      document.getElementById('download').addEventListener('click', (event) => {
+        if (!detected) return;
+        event.preventDefault();
+        location.href = TARGETS[detected].href;
+      });
+
+      document.getElementById('share').addEventListener('click', async () => {
+        const url = location.href;
+        const text =
+          'Fox Media 🦊 : tes films, séries et musiques de ton téléphone dans un seul lecteur.';
+        if (navigator.share) {
+          await navigator.share({ title: 'Fox Media', text, url }).catch(() => {});
+        } else {
+          await navigator.clipboard.writeText(`${text} ${url}`).catch(() => {});
+          document.getElementById('share').textContent = 'Lien copié !';
+        }
+      });
+    </script>
+  </body>
+</html>
