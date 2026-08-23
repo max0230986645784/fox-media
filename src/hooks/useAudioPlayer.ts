@@ -58,6 +58,9 @@ export function useAudioPlayer(library: Library): AudioPlayer {
   urlForRef.current = urlFor;
   const updateItemRef = useRef(updateItem);
   updateItemRef.current = updateItem;
+  const itemsRef = useRef(library.items);
+  itemsRef.current = library.items;
+  const savedAtRef = useRef(0);
 
   useEffect(() => {
     const audio = audioRef.current;
@@ -69,6 +72,16 @@ export function useAudioPlayer(library: Library): AudioPlayer {
     }
     audio.src = url;
     setTime(0);
+    const known = itemsRef.current.find((item) => item.id === currentId);
+    const resumeAt = known && known.progress > 5 ? known.progress : 0;
+    if (resumeAt > 0) {
+      const jump = () => {
+        audio.currentTime = resumeAt;
+        setTime(resumeAt);
+      };
+      if (audio.readyState >= 1) jump();
+      else audio.addEventListener('loadedmetadata', jump, { once: true });
+    }
     audio.play().then(
       () => setIsPlaying(true),
       () => setIsPlaying(false),
@@ -167,8 +180,15 @@ export function useAudioPlayer(library: Library): AudioPlayer {
 
   const onTimeUpdate = useCallback(() => {
     const audio = audioRef.current;
-    if (audio) setTime(audio.currentTime);
-  }, []);
+    if (!audio) return;
+    setTime(audio.currentTime);
+    // Remember where the listener stopped, so the track resumes next time.
+    const now = Date.now();
+    if (currentId && now - savedAtRef.current > 5000) {
+      savedAtRef.current = now;
+      updateItemRef.current(currentId, { progress: audio.currentTime });
+    }
+  }, [currentId]);
 
   const onLoadedMetadata = useCallback(() => {
     const audio = audioRef.current;
@@ -183,7 +203,7 @@ export function useAudioPlayer(library: Library): AudioPlayer {
     const audio = audioRef.current;
     if (currentId) {
       const played = library.items.find((item) => item.id === currentId);
-      updateItem(currentId, { playCount: (played?.playCount ?? 0) + 1 });
+      updateItem(currentId, { playCount: (played?.playCount ?? 0) + 1, progress: 0 });
     }
     if (repeat === 'one' && audio) {
       audio.currentTime = 0;

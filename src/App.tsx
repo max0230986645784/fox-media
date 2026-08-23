@@ -10,6 +10,7 @@ import { useEqualizer } from './hooks/useEqualizer';
 import { usePlaylists } from './hooks/usePlaylists';
 import { useWallet } from './hooks/useWallet';
 import { byAlbum, byArtist, byFolder } from './lib/group';
+import { resumable } from './lib/resume';
 import { filesFromDataTransfer } from './lib/scan';
 import { AdBanner } from './components/AdBanner';
 import { IosInstall } from './components/IosInstall';
@@ -21,6 +22,7 @@ import { SongList } from './components/SongList';
 import { VideoList } from './components/VideoList';
 import { GroupList } from './components/GroupList';
 import { PlaylistsView } from './components/PlaylistsView';
+import { ContinueRow } from './components/ContinueRow';
 import { MiniPlayer } from './components/MiniPlayer';
 import { FullPlayer } from './components/FullPlayer';
 import { EqualizerSheet } from './components/EqualizerSheet';
@@ -252,9 +254,23 @@ export default function App() {
 
     switch (tab) {
       case 'videos':
-        return videos.length > 0 ? videoScreen(videos) : <Empty label="Aucune vidéo" />;
+        return videos.length > 0 ? (
+          <>
+            <ContinueRow items={resumable(videos)} onPlay={(item) => setVideoId(item.id)} />
+            {videoScreen(videos)}
+          </>
+        ) : (
+          <Empty label="Aucune vidéo" />
+        );
       case 'songs':
-        return songs.length > 0 ? songScreen(songs) : <Empty label="Aucune musique" />;
+        return songs.length > 0 ? (
+          <>
+            <ContinueRow items={resumable(songs)} onPlay={(item) => playSongs(songs, item.id)} />
+            {songScreen(songs)}
+          </>
+        ) : (
+          <Empty label="Aucune musique" />
+        );
       case 'playlists':
         return (
           <PlaylistsView
