@@ -55,7 +55,8 @@
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
       "allowElevation": true,
-      "differentialPackage": true
+      "differentialPackage": true,
+      "artifactName": "FoxMedia-Setup-${version}.${ext}"
     },
     "publish": [
       {

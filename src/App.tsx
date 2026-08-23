@@ -13,7 +13,7 @@ import { byAlbum, byArtist, byFolder } from './lib/group';
 import { resumable } from './lib/resume';
 import { filesFromDataTransfer } from './lib/scan';
 import { AdBanner } from './components/AdBanner';
-import { IosInstall } from './components/IosInstall';
+import { InstallPrompt } from './components/InstallPrompt';
 import { WalletSheet } from './components/WalletSheet';
 import { LarkHeader } from './components/LarkHeader';
 import type { Tab } from './components/LarkHeader';
@@ -354,7 +354,7 @@ export default function App() {
         </p>
       )}
 
-      <IosInstall />
+      <InstallPrompt />
 
       {licence.ready && !licence.licence && <AdBanner />}
 

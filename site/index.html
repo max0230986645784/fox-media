@@ -401,7 +401,19 @@
             <li><b>Windows</b> — <a data-dl="windows" href="#">installeur .exe</a></li>
             <li><b>iPhone / iPad</b> — <a data-dl="ios" href="#">ouvrir dans Safari puis Partager → Sur l'écran d'accueil</a></li>
             <li><b>Linux</b> — <a data-dl="linux" href="#">fichier .AppImage</a></li>
+            <li><b>Sans rien installer</b> — <a data-dl="web" href="#">ouvrir l'appli dans le navigateur</a></li>
           </ul>
+
+          <details class="steps" id="ios-steps">
+            <summary>Installer sur iPhone / iPad, étape par étape</summary>
+            <ol>
+              <li>Ouvre cette page dans <b>Safari</b> (pas Chrome).</li>
+              <li>Touche <b>Installer sur iPhone / iPad</b> ci-dessus : l'appli s'ouvre.</li>
+              <li>Touche le bouton <b>Partager</b> en bas (carré avec une flèche vers le haut).</li>
+              <li>Fais défiler, touche <b>Sur l'écran d'accueil</b>, puis <b>Ajouter</b>.</li>
+            </ol>
+            <p>Gratuit, sans App Store. Tes fichiers restent sur ton appareil.</p>
+          </details>
         </div>
       </section>
 
@@ -427,7 +439,7 @@
         // Direct files, so nobody has to hunt through a releases page.
         apkUrl: '/FoxMedia-1.0.1.apk',
         exeUrl:
-          'https://github.com/max0230986645784/fox-media/releases/download/1.0.0.2/FoxMedia-Setup-1.0.0.2.exe',
+          'https://github.com/max0230986645784/fox-media/releases/latest/download/FoxMedia-Setup-1.0.1.exe',
         appImageUrl: '',
       };
 
@@ -494,6 +506,11 @@
         ios: {
           label: 'Installer sur iPhone / iPad',
           hint: 'Ouvre l\u2019appli dans Safari, puis Partager → Sur l\u2019écran d\u2019accueil. Gratuit, sans App Store.',
+          href: CONFIG.appUrl + suffix,
+        },
+        web: {
+          label: "Ouvrir l'appli dans le navigateur",
+          hint: "L'appli marche aussi sans installation, directement dans ton navigateur.",
           href: CONFIG.appUrl + suffix,
         },
         linux: {

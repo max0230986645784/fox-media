@@ -1,0 +1,30 @@
+name: Release
+
+# Builds and publishes the Windows installer for every version tag, so the
+# download button of the site always points at the latest build. The Android APK
+# is built and published separately because it must be signed with the release
+# keystore, which never leaves the developer machine.
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - run: npm run dist:win
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: release/FoxMedia-Setup-*.exe
+          fail_on_unmatched_files: true
