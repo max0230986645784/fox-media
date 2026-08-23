@@ -195,6 +195,14 @@
         text-transform: uppercase;
       }
 
+      .plans[hidden] {
+        display: none;
+      }
+
+      .plans a {
+        color: var(--accent);
+      }
+
       .plans {
         list-style: none;
         margin: 0;
@@ -388,7 +396,7 @@
             <a class="btn primary" id="install-main" href="#">Télécharger</a>
             <a class="btn" id="install-alt" href="#">Autres appareils</a>
           </div>
-          <ul class="plans" id="install-all">
+          <ul class="plans" id="install-all" hidden>
             <li><b>Android</b> — <a data-dl="android" href="#">fichier .apk</a></li>
             <li><b>Windows</b> — <a data-dl="windows" href="#">installeur .exe</a></li>
             <li><b>iPhone / iPad</b> — <a data-dl="ios" href="#">ouvrir dans Safari puis Partager → Sur l'écran d'accueil</a></li>
