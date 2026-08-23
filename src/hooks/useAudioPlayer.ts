@@ -33,18 +33,39 @@ export interface AudioPlayer {
   onEnded: () => void;
 }
 
+const PREFS_KEY = 'fox-media:player';
+
+interface Prefs {
+  volume: number;
+  rate: number;
+  shuffle: boolean;
+  repeat: RepeatMode;
+}
+
+function readPrefs(): Prefs {
+  const fallback: Prefs = { volume: 1, rate: 1, shuffle: false, repeat: 'off' };
+  try {
+    const raw = localStorage.getItem(PREFS_KEY);
+    if (!raw) return fallback;
+    return { ...fallback, ...(JSON.parse(raw) as Partial<Prefs>) };
+  } catch {
+    return fallback;
+  }
+}
+
 export function useAudioPlayer(library: Library): AudioPlayer {
+  const prefs = useRef(readPrefs()).current;
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const [queue, setQueue] = useState<string[]>([]);
   const [index, setIndex] = useState(-1);
   const [isPlaying, setIsPlaying] = useState(false);
   const [time, setTime] = useState(0);
   const [duration, setDuration] = useState(0);
-  const [volume, setVolumeState] = useState(1);
+  const [volume, setVolumeState] = useState(prefs.volume);
   const [muted, setMuted] = useState(false);
-  const [rate, setRateState] = useState(1);
-  const [shuffle, setShuffle] = useState(false);
-  const [repeat, setRepeat] = useState<RepeatMode>('off');
+  const [rate, setRateState] = useState(prefs.rate);
+  const [shuffle, setShuffle] = useState(prefs.shuffle);
+  const [repeat, setRepeat] = useState<RepeatMode>(prefs.repeat);
 
   const currentId = index >= 0 ? (queue[index] ?? null) : null;
   const current = currentId
@@ -97,6 +118,15 @@ export function useAudioPlayer(library: Library): AudioPlayer {
       audio.playbackRate = rate;
     }
   }, [volume, muted, rate]);
+
+  // Volume, speed, shuffle and repeat are expected to survive a restart.
+  useEffect(() => {
+    try {
+      localStorage.setItem(PREFS_KEY, JSON.stringify({ volume, rate, shuffle, repeat }));
+    } catch {
+      // Private browsing: preferences simply stay for this session.
+    }
+  }, [volume, rate, shuffle, repeat]);
 
   const playList = useCallback((ids: string[], startId?: string) => {
     if (ids.length === 0) return;
