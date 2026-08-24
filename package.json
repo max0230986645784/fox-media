@@ -3,7 +3,7 @@
   "productName": "Fox Media",
   "description": "Lecteur local de films, séries et musiques (MP4/MP3) pour PC et téléphone",
   "private": true,
-  "version": "1.0.1",
+  "version": "1.0.2",
   "type": "module",
   "main": "electron/main.cjs",
   "scripts": {
@@ -62,7 +62,8 @@
       {
         "provider": "github",
         "owner": "max0230986645784",
-        "repo": "fox-media"
+        "repo": "fox-media",
+        "releaseType": "release"
       }
     ],
     "linux": {

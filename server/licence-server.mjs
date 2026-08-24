@@ -95,9 +95,20 @@ function base64Url(buffer) {
   return Buffer.from(buffer).toString('base64url');
 }
 
-/** FOX-<payload>-<signature>, verified in the app with the public key only. */
-function issueKey({ email, plan, name }) {
-  const payload = { id: randomUUID(), plan, email, name: name ?? '', issuedAt: Date.now() };
+/**
+ * FOX-<payload>-<signature>, verified in the app with the public key only.
+ * `months` bounds the ad-free period; 0 or undefined means forever.
+ */
+function issueKey({ email, plan, name, months = 0 }) {
+  const issuedAt = Date.now();
+  const payload = {
+    id: randomUUID(),
+    plan,
+    email,
+    name: name ?? '',
+    issuedAt,
+    ...(months > 0 ? { expiresAt: issuedAt + months * 30 * 86_400_000 } : {}),
+  };
   const bytes = Buffer.from(JSON.stringify(payload), 'utf8');
   const signer = createSign('SHA256');
   signer.update(bytes);
@@ -340,8 +351,8 @@ function readBody(request) {
   });
 }
 
-async function grantKey(user, plan) {
-  const { key } = issueKey({ email: user.email, plan, name: user.name });
+async function grantKey(user, plan, months = 0) {
+  const { key } = issueKey({ email: user.email, plan, name: user.name, months });
   user.key = key;
   user.plan = plan;
   if (plan === 'founder') db.founderIssued += 1;

@@ -15,11 +15,31 @@ export interface LicencePayload {
   name?: string;
   /** Issue date, epoch ms. */
   issuedAt: number;
+  /** End of the ad-free period, epoch ms; absent means forever. */
+  expiresAt?: number;
 }
 
 export interface LicenceState {
   key: string;
   payload: LicencePayload;
+}
+
+/**
+ * Ads are hidden while the key is still inside its period. The check is purely
+ * local, so it also works with no network at all.
+ */
+export function adsRemoved(licence: LicenceState | null): boolean {
+  if (!licence) return false;
+  const { expiresAt } = licence.payload;
+  return !expiresAt || expiresAt > Date.now();
+}
+
+/** Days left on a timed ad-free key; Infinity for a lifetime key. */
+export function adsFreeDaysLeft(licence: LicenceState | null): number {
+  if (!licence) return 0;
+  const { expiresAt } = licence.payload;
+  if (!expiresAt) return Number.POSITIVE_INFINITY;
+  return Math.max(0, Math.ceil((expiresAt - Date.now()) / 86_400_000));
 }
 
 export interface TrialState {

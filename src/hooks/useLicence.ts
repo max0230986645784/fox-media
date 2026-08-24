@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
-import { LICENCE_SERVER, TRIAL_ITEM_LIMIT } from '../config';
+import { FREE_MODE, LICENCE_SERVER, TRIAL_ITEM_LIMIT } from '../config';
 import type { LicenceState } from '../lib/licence';
-import { activateKey, deviceId, loadLicence } from '../lib/licence';
+import { activateKey, adsFreeDaysLeft, adsRemoved, deviceId, loadLicence } from '../lib/licence';
 
 export interface Licence {
   ready: boolean;
@@ -11,6 +11,10 @@ export interface Licence {
   unlocked: boolean;
   /** Items allowed in the library; Infinity once a key is active. */
   itemLimit: number;
+  /** True while an ad-free plan is running: no banner is rendered. */
+  adsFree: boolean;
+  /** Days left without ads; Infinity for the lifetime plan. */
+  adsFreeDaysLeft: number;
   activate: (key: string) => Promise<{ ok: boolean; message: string }>;
   /** Free founder key: the holder signs it with a name or nickname. */
   claimFreeKey: (name: string, email: string) => Promise<{ ok: boolean; message: string }>;
@@ -88,8 +92,11 @@ export function useLicence(): Licence {
     ready,
     licence,
     trialDaysLeft,
-    unlocked: licence !== null || trialDaysLeft > 0,
-    itemLimit: licence !== null ? Number.POSITIVE_INFINITY : TRIAL_ITEM_LIMIT,
+    unlocked: FREE_MODE || licence !== null || trialDaysLeft > 0,
+    itemLimit:
+      FREE_MODE || licence !== null ? Number.POSITIVE_INFINITY : TRIAL_ITEM_LIMIT,
+    adsFree: adsRemoved(licence),
+    adsFreeDaysLeft: adsFreeDaysLeft(licence),
     activate,
     claimFreeKey,
   };

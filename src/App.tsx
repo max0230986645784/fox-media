@@ -35,7 +35,7 @@ import { LicenceDialog } from './components/LicenceDialog';
 import { AccountDialog } from './components/AccountDialog';
 import { ShareDialog } from './components/ShareDialog';
 import { Icon } from './components/Icon';
-import { OWNER_CODE, PRICE_EUR } from './config';
+import { NOADS_PLANS, OWNER_CODE } from './config';
 import './App.css';
 
 function compare(a: MediaItem, b: MediaItem, sort: SortKey): number {
@@ -343,20 +343,18 @@ export default function App() {
         onSettings={() => setSettingsOpen(true)}
       />
 
-      {licence.ready && !licence.licence && (
+      {licence.ready && !licence.adsFree && (
         <p className="notice licence-notice">
-          {licence.trialDaysLeft > 0
-            ? `Version d'essai : ${licence.trialDaysLeft} jour(s) restant(s), ${licence.itemLimit} médias max.`
-            : "Ton essai est terminé."}{' '}
+          Fox Media est gratuit et marche sans réseau.{' '}
           <button type="button" className="link" onClick={() => setLicenceOpen(true)}>
-            Débloquer à {PRICE_EUR} € (100 premières installations gratuites)
+            Enlever les pubs dès {NOADS_PLANS[0].price} €
           </button>
         </p>
       )}
 
       <InstallPrompt />
 
-      {licence.ready && !licence.licence && <AdBanner />}
+      {licence.ready && !licence.adsFree && <AdBanner />}
 
       {library.missingCount > 0 && (
         <p className="notice">

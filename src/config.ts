@@ -9,6 +9,12 @@ export const PRICE_EUR = Number(import.meta.env.VITE_PRICE_EUR ?? 1);
 /** The first installs get a free "founder" key from the licence server. */
 export const FREE_INSTALLS = Number(import.meta.env.VITE_FREE_INSTALLS ?? 100);
 
+/**
+ * Fox Media is free: the whole app stays unlocked, with no key, no trial and no
+ * network call. Set VITE_FREE_MODE=0 to bring the licence gate back.
+ */
+export const FREE_MODE = (import.meta.env.VITE_FREE_MODE ?? '1') !== '0';
+
 /** Days of full access before a key is required. */
 export const TRIAL_DAYS = Number(import.meta.env.VITE_TRIAL_DAYS ?? 7);
 
@@ -17,6 +23,16 @@ export const TRIAL_ITEM_LIMIT = Number(import.meta.env.VITE_TRIAL_ITEM_LIMIT ?? 
 
 /** Licence server issuing signed keys (also serves the free founder keys). */
 export const LICENCE_SERVER = import.meta.env.VITE_LICENCE_SERVER ?? '';
+
+/**
+ * Ad-free plans. The app itself is free with ads: paying only removes them.
+ * `months: 0` means forever. Prices are in euros.
+ */
+export const NOADS_PLANS: { id: string; label: string; months: number; price: number }[] = [
+  { id: 'month', label: '1 mois sans pub', months: 1, price: 1 },
+  { id: 'two-months', label: '2 mois sans pub', months: 2, price: 5 },
+  { id: 'lifetime', label: 'À vie, sans pub', months: 0, price: 100 },
+];
 
 /** Payment page (Stripe Payment Link or PayPal button) opened to buy a key. */
 export const CHECKOUT_URL = import.meta.env.VITE_CHECKOUT_URL ?? '';

@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { CHECKOUT_URL, FREE_INSTALLS, PRICE_EUR } from '../config';
+import { CHECKOUT_URL, NOADS_PLANS } from '../config';
 import type { Licence } from '../hooks/useLicence';
 import { openExternal } from '../lib/native';
 
@@ -37,21 +37,28 @@ export function LicenceDialog({ licence, locked, onClose }: Props) {
   return (
     <div className="modal-backdrop" role="dialog" aria-modal="true">
       <div className="modal licence-modal">
-        <h2>Débloquer Fox Media</h2>
-        {licence.licence ? (
+        <h2>Fox Media sans pub</h2>
+        {licence.adsFree ? (
           <p className="licence-active">
-            Licence {licence.licence.payload.plan} active
-            {licence.licence.payload.name ? ` au nom de ${licence.licence.payload.name}` : ''} —
-            merci !
+            Sans pub{licence.licence?.payload.name ? ` pour ${licence.licence.payload.name}` : ''}{' '}
+            {licence.adsFreeDaysLeft === Number.POSITIVE_INFINITY
+              ? '— à vie, merci !'
+              : `— ${licence.adsFreeDaysLeft} jour(s) restant(s), merci !`}
           </p>
         ) : (
-          <p className="licence-intro">
-            Fox Media est à {PRICE_EUR} € une fois, à vie. Les {FREE_INSTALLS} premières
-            installations reçoivent une clé <strong>founder</strong> gratuite.
-            {licence.trialDaysLeft > 0
-              ? ` Essai en cours : ${licence.trialDaysLeft} jour(s) restant(s).`
-              : ' Ton essai est terminé.'}
-          </p>
+          <>
+            <p className="licence-intro">
+              L&apos;appli est gratuite et complète, même sans réseau. Payer enlève seulement
+              les pubs :
+            </p>
+            <ul className="plan-list">
+              {NOADS_PLANS.map((plan) => (
+                <li key={plan.id}>
+                  <strong>{plan.price} €</strong> — {plan.label}
+                </li>
+              ))}
+            </ul>
+          </>
         )}
 
         <label className="field">
@@ -97,9 +104,9 @@ export function LicenceDialog({ licence, locked, onClose }: Props) {
           >
             Clé gratuite (founder)
           </button>
-          {CHECKOUT_URL && (
+          {CHECKOUT_URL && !licence.adsFree && (
             <button type="button" className="button" onClick={() => openExternal(CHECKOUT_URL)}>
-              Acheter à {PRICE_EUR} €
+              Payer pour enlever les pubs
             </button>
           )}
         </div>

@@ -1624,6 +1624,41 @@ button.video-text {
   border-color: rgba(255, 122, 26, 0.35);
 }
 
+.ad-banner.house a {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: inherit;
+  text-decoration: none;
+}
+
+.ad-image {
+  width: 56px;
+  height: 56px;
+  border-radius: 10px;
+  object-fit: cover;
+}
+
+.ad-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.plan-list {
+  margin: 0 0 12px;
+  padding-left: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.plan-list strong {
+  color: var(--accent);
+}
+
 .ad-banner.house strong {
   font-size: 15px;
   color: var(--accent);

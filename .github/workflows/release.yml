@@ -23,8 +23,8 @@ jobs:
           node-version: '22'
           cache: npm
       - run: npm ci
-      - run: npm run dist:win
-      - uses: softprops/action-gh-release@v2
-        with:
-          files: release/FoxMedia-Setup-*.exe
-          fail_on_unmatched_files: true
+      # electron-builder publishes the installer and the latest.yml manifest the
+      # installed app reads to update itself, so the token is required here.
+      - run: npm run dist:win -- --publish always
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
