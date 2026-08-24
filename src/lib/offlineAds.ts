@@ -1,9 +1,8 @@
-import { ADS_CONTACT } from '../config';
+import { NOADS_PLANS } from '../config';
 
 /**
- * Sponsor banners stored on the device, so an advertiser is still shown when
- * Fox Media runs without any network. The owner fills the list from the wallet
- * screen when a sponsor pays; the house banner is the fallback.
+ * Banners stored on the device, so something is still shown when Fox Media runs
+ * without any network. The house banner is the fallback.
  */
 export interface OfflineAd {
   id: string;
@@ -21,8 +20,8 @@ const KEY = 'fox-media:offline-ads';
 
 export const HOUSE_AD: OfflineAd = {
   id: 'house',
-  title: 'Ta pub ici',
-  text: `Espace partenaire Fox Media — contact : ${ADS_CONTACT}`,
+  title: 'Fox Media sans pub',
+  text: `Enlève les pubs dès ${NOADS_PLANS[0].price} € et garde tout hors ligne.`,
 };
 
 export function loadOfflineAds(): OfflineAd[] {

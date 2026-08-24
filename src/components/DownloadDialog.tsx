@@ -26,18 +26,22 @@ export function DownloadDialog({ library, onClose }: Props) {
   const [percent, setPercent] = useState<number | null>(null);
   const [status, setStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [source, setSource] = useState<string | null>(null);
   const input = useRef<HTMLInputElement>(null);
   const bridge = nativeBridge();
 
   useEffect(() => {
     input.current?.focus();
+  }, []);
+
+  const pasteFromClipboard = () => {
     void navigator.clipboard
       ?.readText()
       .then((text) => {
-        if (/^https?:\/\//i.test(text.trim())) setUrl((current) => current || text.trim());
+        if (/^https?:\/\//i.test(text.trim())) setUrl(text.trim());
       })
       .catch(() => undefined);
-  }, []);
+  };
 
   useEffect(() => bridge?.onDownloadProgress?.((value) => setPercent(value)), [bridge]);
 
@@ -64,9 +68,10 @@ export function DownloadDialog({ library, onClose }: Props) {
         const file = new File([blob], /\.[a-z0-9]{2,4}$/i.test(name) ? name : `${name}.mp4`, {
           type: blob.type || 'video/mp4',
         });
-        const added = await library.addFiles([file]);
+        const added = await library.addFiles([file], true);
         setStatus(added > 0 ? `${file.name} est dans ta bibliothèque.` : 'Cette vidéo y était déjà.');
       }
+      setSource(link);
       setUrl('');
       setPercent(100);
     } catch (cause) {
@@ -86,7 +91,8 @@ export function DownloadDialog({ library, onClose }: Props) {
         <h2>Télécharger depuis un lien</h2>
         <p className="licence-intro">
           Colle l&apos;adresse d&apos;une vidéo : Fox Media la télécharge sur ton appareil et
-          l&apos;ajoute à ta bibliothèque. Ensuite, elle se regarde sans réseau.
+          l&apos;ajoute à ta bibliothèque. Ensuite, elle se regarde sans réseau, et elle reste chez
+          toi : rien n&apos;est envoyé ni partagé.
         </p>
 
         <label className="field">
@@ -101,6 +107,9 @@ export function DownloadDialog({ library, onClose }: Props) {
             }}
           />
         </label>
+        <button type="button" className="button" onClick={pasteFromClipboard}>
+          Coller le lien copié
+        </button>
 
         {percent !== null && (
           <div className="download-progress" aria-live="polite">
@@ -111,6 +120,13 @@ export function DownloadDialog({ library, onClose }: Props) {
 
         {status && <p className="licence-status">{status}</p>}
         {error && <p className="licence-error">{error}</p>}
+
+        {source && (
+          <p className="download-notice">
+            <strong>Usage personnel uniquement — ne republie pas cette vidéo.</strong>
+            <span>Source : {source}</span>
+          </p>
+        )}
 
         <div className="licence-actions">
           <button

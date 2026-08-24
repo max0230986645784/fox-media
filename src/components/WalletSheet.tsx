@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { toDataURL } from 'qrcode';
 import type { PayoutMethod, Wallet } from '../hooks/useWallet';
-import { ADS_CONTACT, ADS_PAYMENT_URL, ADS_PLANS, NOADS_PLANS, PAYOUT_URL } from '../config';
+import { NOADS_PLANS, PAYOUT_URL } from '../config';
 import { openExternal } from '../lib/native';
 import { Icon } from './Icon';
 
@@ -14,6 +14,10 @@ function formatDate(value: number): string {
   return new Date(value).toLocaleDateString('fr-FR');
 }
 
+function euros(value: number): string {
+  return value.toLocaleString('fr-FR', { style: 'currency', currency: 'EUR' });
+}
+
 const METHODS: { key: PayoutMethod; label: string }[] = [
   { key: 'paypal', label: 'PayPal' },
   { key: 'carte', label: 'Carte' },
@@ -21,18 +25,16 @@ const METHODS: { key: PayoutMethod; label: string }[] = [
 ];
 
 /**
- * MoneyFox — owner-only screen: what advertisers owe, what the ad-free plans
- * brought in, the QR code buyers scan to pay, and every withdrawal.
+ * MoneyFox — owner-only screen: what the ad-free plans brought in, the QR code
+ * buyers scan to pay, and every withdrawal.
  */
 export function WalletSheet({ wallet, onClose }: Props) {
-  const [advertiser, setAdvertiser] = useState('');
-  const [email, setEmail] = useState('');
-  const [plan, setPlan] = useState(ADS_PLANS[0]);
   const [amount, setAmount] = useState('');
   const [method, setMethod] = useState<PayoutMethod>('paypal');
   const [qr, setQr] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
-  const payLink = PAYOUT_URL || ADS_PAYMENT_URL;
+  const payLink = PAYOUT_URL;
 
   useEffect(() => {
     if (!payLink) return;
@@ -41,21 +43,6 @@ export function WalletSheet({ wallet, onClose }: Props) {
       .then(setQr)
       .catch(() => setQr(null));
   }, [payLink]);
-
-  const submit = () => {
-    if (!advertiser.trim()) return;
-    wallet.add({
-      advertiser: advertiser.trim(),
-      email: email.trim(),
-      months: plan.months,
-      amount: plan.price,
-      startedAt: Date.now(),
-      paid: false,
-      kind: 'ads',
-    });
-    setAdvertiser('');
-    setEmail('');
-  };
 
   const addNoAds = (price: number, months: number) => {
     wallet.add({
@@ -71,7 +58,15 @@ export function WalletSheet({ wallet, onClose }: Props) {
 
   const payout = () => {
     const value = Number(amount.replace(',', '.'));
-    if (!(value > 0)) return;
+    if (!(value > 0)) {
+      setError('Entre un montant supérieur à 0 €.');
+      return;
+    }
+    if (value > wallet.balance) {
+      setError(`Tu ne peux pas retirer plus que ton solde (${euros(wallet.balance)}).`);
+      return;
+    }
+    setError(null);
     wallet.withdraw(value, method, '');
     setAmount('');
   };
@@ -92,19 +87,19 @@ export function WalletSheet({ wallet, onClose }: Props) {
 
         <div className="wallet-totals">
           <div>
-            <strong>{wallet.balance.toFixed(2)} €</strong>
+            <strong>{euros(wallet.balance)}</strong>
             <span>Disponible</span>
           </div>
           <div>
-            <strong>{wallet.paidTotal.toFixed(2)} €</strong>
+            <strong>{euros(wallet.paidTotal)}</strong>
             <span>Encaissé</span>
           </div>
           <div>
-            <strong>{wallet.pendingTotal.toFixed(2)} €</strong>
+            <strong>{euros(wallet.pendingTotal)}</strong>
             <span>En attente</span>
           </div>
           <div>
-            <strong>{wallet.payoutTotal.toFixed(2)} €</strong>
+            <strong>{euros(wallet.payoutTotal)}</strong>
             <span>Retiré</span>
           </div>
         </div>
@@ -129,6 +124,7 @@ export function WalletSheet({ wallet, onClose }: Props) {
             Retirer
           </button>
         </div>
+        {error && <p className="licence-error">{error}</p>}
         {payLink ? (
           <button type="button" className="settings-row" onClick={() => openExternal(payLink)}>
             <Icon name="wallet" size={22} />
@@ -153,38 +149,6 @@ export function WalletSheet({ wallet, onClose }: Props) {
           </>
         )}
 
-        <h3>Ajouter une pub vendue</h3>
-        <div className="wallet-form">
-          <input
-            type="text"
-            placeholder="Annonceur"
-            value={advertiser}
-            onChange={(event) => setAdvertiser(event.target.value)}
-          />
-          <input
-            type="email"
-            placeholder="Email de l'annonceur"
-            value={email}
-            onChange={(event) => setEmail(event.target.value)}
-          />
-          <select
-            value={plan.months}
-            onChange={(event) => {
-              const months = Number(event.target.value);
-              setPlan(ADS_PLANS.find((option) => option.months === months) ?? ADS_PLANS[0]);
-            }}
-          >
-            {ADS_PLANS.map((option) => (
-              <option key={option.months} value={option.months}>
-                {option.months} mois — {option.price} €
-              </option>
-            ))}
-          </select>
-          <button type="button" className="primary" onClick={submit}>
-            Enregistrer
-          </button>
-        </div>
-
         <h3>Encaisser un « sans pub »</h3>
         <div className="wallet-plans">
           {NOADS_PLANS.map((option) => (
@@ -201,9 +165,7 @@ export function WalletSheet({ wallet, onClose }: Props) {
 
         <h3>Ventes</h3>
         {wallet.sales.length === 0 ? (
-          <p className="hint">
-            Aucune vente. Les annonceurs te contactent sur {ADS_CONTACT}.
-          </p>
+          <p className="hint">Aucune vente pour le moment.</p>
         ) : (
           <ul className="wallet-list">
             {wallet.sales.map((sale) => (
@@ -211,8 +173,8 @@ export function WalletSheet({ wallet, onClose }: Props) {
                 <span className="wallet-line">
                   <strong>{sale.advertiser}</strong>
                   <span>
-                    {sale.months === 0 ? 'à vie' : `${sale.months} mois`} •{' '}
-                    {sale.amount.toFixed(2)} € • depuis {formatDate(sale.startedAt)}
+                    {sale.months === 0 ? 'à vie' : `${sale.months} mois`} • {euros(sale.amount)} •
+                    depuis {formatDate(sale.startedAt)}
                   </span>
                   {sale.email && <span className="hint">{sale.email}</span>}
                 </span>
@@ -243,7 +205,7 @@ export function WalletSheet({ wallet, onClose }: Props) {
               {wallet.payouts.map((entry) => (
                 <li key={entry.id}>
                   <span className="wallet-line">
-                    <strong>{entry.amount.toFixed(2)} €</strong>
+                    <strong>{euros(entry.amount)}</strong>
                     <span>
                       {METHODS.find((option) => option.key === entry.method)?.label} •{' '}
                       {formatDate(entry.at)}

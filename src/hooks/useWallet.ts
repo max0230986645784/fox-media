@@ -73,32 +73,6 @@ export function useWallet(): Wallet {
     localStorage.setItem(PAYOUT_KEY, JSON.stringify(payouts));
   }, [payouts]);
 
-  const add = useCallback((sale: Omit<AdSale, 'id'>) => {
-    setSales((current) => [{ ...sale, id: crypto.randomUUID() }, ...current]);
-  }, []);
-
-  const togglePaid = useCallback((id: string) => {
-    setSales((current) =>
-      current.map((sale) => (sale.id === id ? { ...sale, paid: !sale.paid } : sale)),
-    );
-  }, []);
-
-  const remove = useCallback((id: string) => {
-    setSales((current) => current.filter((sale) => sale.id !== id));
-  }, []);
-
-  const withdraw = useCallback((amount: number, method: PayoutMethod, note: string) => {
-    if (!(amount > 0)) return;
-    setPayouts((current) => [
-      { id: crypto.randomUUID(), amount, method, note, at: Date.now() },
-      ...current,
-    ]);
-  }, []);
-
-  const removePayout = useCallback((id: string) => {
-    setPayouts((current) => current.filter((payout) => payout.id !== id));
-  }, []);
-
   const totals = useMemo(() => {
     let paidTotal = 0;
     let pendingTotal = 0;
@@ -114,6 +88,36 @@ export function useWallet(): Wallet {
     const payoutTotal = payouts.reduce((sum, payout) => sum + payout.amount, 0);
     return { paidTotal, pendingTotal, activeCount, payoutTotal, balance: paidTotal - payoutTotal };
   }, [sales, payouts]);
+
+  const add = useCallback((sale: Omit<AdSale, 'id'>) => {
+    setSales((current) => [{ ...sale, id: crypto.randomUUID() }, ...current]);
+  }, []);
+
+  const togglePaid = useCallback((id: string) => {
+    setSales((current) =>
+      current.map((sale) => (sale.id === id ? { ...sale, paid: !sale.paid } : sale)),
+    );
+  }, []);
+
+  const remove = useCallback((id: string) => {
+    setSales((current) => current.filter((sale) => sale.id !== id));
+  }, []);
+
+  /** A withdrawal never goes past the balance: you cannot take out money you did not earn. */
+  const withdraw = useCallback(
+    (amount: number, method: PayoutMethod, note: string) => {
+      if (!(amount > 0) || amount > totals.balance) return;
+      setPayouts((current) => [
+        { id: crypto.randomUUID(), amount, method, note, at: Date.now() },
+        ...current,
+      ]);
+    },
+    [totals.balance],
+  );
+
+  const removePayout = useCallback((id: string) => {
+    setPayouts((current) => current.filter((payout) => payout.id !== id));
+  }, []);
 
   return { sales, payouts, ...totals, add, togglePaid, remove, withdraw, removePayout };
 }

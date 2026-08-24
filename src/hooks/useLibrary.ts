@@ -1,6 +1,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { MediaItem } from '../types';
-import { clearItems, deleteItem, loadItems, saveItems } from '../lib/db';
+import {
+  clearBlobs,
+  clearItems,
+  deleteBlob,
+  deleteItem,
+  loadBlobs,
+  loadItems,
+  saveBlob,
+  saveItems,
+} from '../lib/db';
 import { scanFiles, scanNativeEntries } from '../lib/scan';
 import { nativeBridge, type NativeEntry } from '../lib/native';
 
@@ -29,8 +38,11 @@ export interface Library {
   mergeItems: (restored: MediaItem[]) => Promise<number>;
   /** Adds files already on disk (desktop downloads) without asking again. */
   addNativeEntries: (entries: NativeEntry[]) => Promise<number>;
-  /** Adds in-memory files (browser downloads) without asking again. */
-  addFiles: (picked: File[]) => Promise<number>;
+  /**
+   * Adds in-memory files without asking again. `keep` stores the file itself on
+   * the device (browser downloads), so it still plays after a reload.
+   */
+  addFiles: (picked: File[], keep?: boolean) => Promise<number>;
   cancelPreview: () => void;
   updateItem: (id: string, patch: Partial<MediaItem>) => void;
   removeItem: (id: string) => void;
@@ -41,8 +53,9 @@ export interface Library {
 
 /**
  * Library metadata lives in IndexedDB. On desktop the absolute path is stored
- * too, so playback survives a restart; in the browser the files stay in memory
- * only and a rescan is needed after a reload.
+ * too, so playback survives a restart. In the browser, files picked by hand stay
+ * in memory (a rescan is needed after a reload) while downloaded files are kept
+ * in IndexedDB and replay offline.
  */
 export function useLibrary(): Library {
   const [items, setItems] = useState<MediaItem[]>([]);
@@ -61,9 +74,12 @@ export function useLibrary(): Library {
 
   useEffect(() => {
     let cancelled = false;
-    loadItems()
-      .then((stored) => {
-        if (!cancelled) setItems(stored);
+    Promise.all([loadItems(), loadBlobs().catch(() => new Map<string, File>())])
+      .then(([stored, blobs]) => {
+        if (cancelled) return;
+        for (const [id, file] of blobs) files.current.set(id, file);
+        if (blobs.size > 0) setAvailableIds(new Set(files.current.keys()));
+        setItems(stored);
       })
       .catch(() => undefined)
       .finally(() => {
@@ -180,12 +196,14 @@ export function useLibrary(): Library {
     return fresh.length;
   }, []);
 
-  const addFiles = useCallback(async (picked: File[]) => {
+  const addFiles = useCallback(async (picked: File[], keep = false) => {
     const result = await scanFiles(picked);
     const fresh = result.items.filter((item) => !knownIds.current.has(item.id));
     for (const item of fresh) {
       const file = result.files.get(item.id);
-      if (file) files.current.set(item.id, file);
+      if (!file) continue;
+      files.current.set(item.id, file);
+      if (keep) await saveBlob(item.id, file);
     }
     if (fresh.length === 0) return 0;
     setAvailableIds(new Set(files.current.keys()));
@@ -213,6 +231,7 @@ export function useLibrary(): Library {
     setAvailableIds(new Set(files.current.keys()));
     setItems((current) => current.filter((item) => item.id !== id));
     void deleteItem(id);
+    void deleteBlob(id);
   }, []);
 
   const clearLibrary = useCallback(() => {
@@ -222,6 +241,7 @@ export function useLibrary(): Library {
     setAvailableIds(new Set());
     setItems([]);
     void clearItems();
+    void clearBlobs();
   }, []);
 
   const pathsById = useMemo(() => {

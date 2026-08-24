@@ -325,18 +325,35 @@ async function downloadDirect(url, dir, onProgress) {
   return target;
 }
 
-/** Pages are handed to yt-dlp, which finds the real video stream. */
+/**
+ * Pages are handed to yt-dlp, which knows a thousand public sites (TikTok,
+ * YouTube, Twitch, Vimeo…). Sites it does not know are retried with the generic
+ * extractor, which picks up plain streams such as .m3u8 embedded in the page.
+ */
 async function downloadPage(url, dir, onProgress) {
   const binary = await ytdlpBinary();
   if (!binary) throw new Error("Ce lien n'est pas un fichier vidéo direct");
 
+  try {
+    return await runYtdlp(binary, url, dir, onProgress, false);
+  } catch (cause) {
+    if (!/unsupported url|no video/i.test(String(cause instanceof Error ? cause.message : cause))) {
+      throw cause;
+    }
+    return runYtdlp(binary, url, dir, onProgress, true);
+  }
+}
+
+function runYtdlp(binary, url, dir, onProgress, generic) {
   const ffmpeg = ffmpegPath();
   const args = [
     '--no-playlist',
     '--newline',
     '--no-part',
+    '--no-warnings',
     '-f', 'bv*+ba/b',
     '--merge-output-format', 'mp4',
+    ...(generic ? ['--force-generic-extractor'] : []),
     ...(ffmpeg ? ['--ffmpeg-location', path.dirname(ffmpeg)] : []),
     '--print', 'after_move:filepath',
     '-o', path.join(dir, '%(title).120B.%(ext)s'),
@@ -513,11 +530,11 @@ function checkForUpdates() {
 
 function createWindow() {
   const window = new BrowserWindow({
-    // Phone-shaped window so the desktop build looks exactly like the Android app.
-    width: 430,
-    height: 900,
-    minWidth: 380,
-    minHeight: 640,
+    // Desktop-shaped window: the layout switches to the wide grid past 1100px.
+    width: 1360,
+    height: 860,
+    minWidth: 420,
+    minHeight: 600,
     backgroundColor: '#0d1016',
     autoHideMenuBar: true,
     title: 'Fox Media',

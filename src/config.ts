@@ -65,29 +65,11 @@ export const ADS_SLOT = import.meta.env.VITE_ADS_SLOT ?? '';
  */
 export const ADS_SCRIPT = import.meta.env.VITE_ADS_SCRIPT ?? '';
 
-/** Address shown on the house banner while no ad network is configured. */
-export const ADS_CONTACT = import.meta.env.VITE_ADS_CONTACT ?? 'foxmedia.pub@hotmail.com';
-
-/**
- * Sponsor plans sold directly to advertisers, cheaper per month as the
- * duration grows. Prices are in euros and only used for display.
- */
-export const ADS_PLANS: { months: number; price: number }[] = [
-  { months: 1, price: 5 },
-  { months: 2, price: 9 },
-  { months: 3, price: 12 },
-  { months: 6, price: 20 },
-  { months: 12, price: 35 },
-];
-
 /**
  * Code opening the owner-only wallet screen. Change it with
  * VITE_OWNER_CODE before publishing so only you can open it.
  */
 export const OWNER_CODE = import.meta.env.VITE_OWNER_CODE ?? 'fox-patron';
-
-/** Payment link where advertisers pay you (PayPal.me or Stripe link). */
-export const ADS_PAYMENT_URL = import.meta.env.VITE_ADS_PAYMENT_URL ?? '';
 
 /**
  * MoneyFox payout link: your PayPal.me or Stripe page. It feeds the QR code

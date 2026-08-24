@@ -1566,6 +1566,21 @@ button.video-text {
   position: relative;
 }
 
+.download-notice {
+  display: grid;
+  gap: 4px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.06);
+  font-size: 13px;
+}
+
+.download-notice span {
+  font-size: 11px;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
 .toast {
   position: fixed;
   left: 50%;
@@ -1618,9 +1633,9 @@ button.video-text {
   font-size: 96px;
 }
 
-/* ---------- Desktop: run the app inside a phone-sized frame ---------- */
+/* ---------- Tablets: run the app inside a phone-sized frame ---------- */
 
-@media (min-width: 620px) {
+@media (min-width: 620px) and (max-width: 1099px) {
   body {
     display: grid;
     place-items: center;
@@ -1700,13 +1715,100 @@ button.video-text {
   color: var(--muted);
 }
 
-@media (min-width: 620px) {
+@media (min-width: 620px) and (max-width: 1099px) {
   .app::-webkit-scrollbar {
     width: 0;
   }
 
   .app {
     scrollbar-width: none;
+  }
+}
+
+/* ---------- Real desktop layout: full window, wide grid, no phone frame ---------- */
+
+@media (min-width: 1100px) {
+  .app {
+    width: 100%;
+    min-height: 100vh;
+    border: 0;
+    border-radius: 0;
+    box-shadow: none;
+  }
+
+  .lark-header {
+    position: sticky;
+    top: 0;
+    z-index: 20;
+    padding: 10px 28px 0;
+    background: color-mix(in srgb, var(--bg) 88%, transparent);
+    backdrop-filter: blur(10px);
+    border-bottom: 1px solid var(--line);
+  }
+
+  .header-row,
+  .tab-row,
+  .content,
+  .notice,
+  .ad-banner {
+    max-width: 1500px;
+    margin-left: auto;
+    margin-right: auto;
+  }
+
+  .brand-name {
+    font-size: 22px;
+  }
+
+  .content {
+    padding: 18px 28px 40px;
+  }
+
+  .video-list ul {
+    grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+    gap: 18px 22px;
+  }
+
+  /* Thumbnail on top, text below: a desktop grid rather than phone rows. */
+  .video-row {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 8px;
+    padding: 10px;
+    border-radius: 14px;
+    background: var(--bg-card);
+  }
+
+  .video-row:hover {
+    background: var(--bg-soft);
+  }
+
+  .video-row .thumb,
+  .video-row .video-thumb {
+    width: 100%;
+    height: 150px;
+    border-radius: 10px;
+  }
+
+  .song-list ul {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(420px, 1fr));
+    gap: 4px 18px;
+  }
+
+  .mini-player {
+    left: 28px;
+    right: 28px;
+    max-width: 1500px;
+  }
+
+  .full-player {
+    padding-left: 8vw;
+    padding-right: 8vw;
+  }
+
+  .settings-sheet {
+    width: min(520px, 96vw);
   }
 }
 
