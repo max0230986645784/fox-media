@@ -18,6 +18,7 @@ import { WalletSheet } from './components/WalletSheet';
 import { LarkHeader } from './components/LarkHeader';
 import type { Tab } from './components/LarkHeader';
 import { ImportButtons } from './components/ImportButtons';
+import { DownloadDialog } from './components/DownloadDialog';
 import { SongList } from './components/SongList';
 import { VideoList } from './components/VideoList';
 import { GroupList } from './components/GroupList';
@@ -79,6 +80,7 @@ export default function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [eqOpen, setEqOpen] = useState(false);
   const [licenceOpen, setLicenceOpen] = useState(false);
+  const [downloadOpen, setDownloadOpen] = useState(false);
   const [accountOpen, setAccountOpen] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
   const [sleepMinutes, setSleepMinutes] = useState<number | null>(null);
@@ -375,6 +377,7 @@ export default function App() {
             <ImportButtons
               onFiles={handleFiles}
               onNative={handleNative}
+              onLink={() => setDownloadOpen(true)}
               scanning={library.scanning}
             />
             <p className="hint">Tu peux aussi glisser-déposer un dossier ici.</p>
@@ -439,6 +442,10 @@ export default function App() {
           onNative={(mode) => {
             setSettingsOpen(false);
             handleNative(mode);
+          }}
+          onLink={() => {
+            setSettingsOpen(false);
+            setDownloadOpen(true);
           }}
           onEqualizer={() => {
             setSettingsOpen(false);
@@ -540,6 +547,10 @@ export default function App() {
       )}
 
       {shareOpen && <ShareDialog api={accountApi} onClose={() => setShareOpen(false)} />}
+
+      {downloadOpen && (
+        <DownloadDialog library={library} onClose={() => setDownloadOpen(false)} />
+      )}
 
       {editing && (
         <MetadataDialog

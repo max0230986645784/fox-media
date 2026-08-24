@@ -251,7 +251,160 @@ function registerProtocols() {
   });
 }
 
+/** Folder every download lands in, next to the user's own videos. */
+function downloadDir() {
+  let base;
+  try {
+    base = app.getPath('videos');
+  } catch {
+    base = app.getPath('userData');
+  }
+  return path.join(base, 'Fox Media');
+}
+
+const YTDLP_URLS = {
+  win32: 'https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe',
+  darwin: 'https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_macos',
+  linux: 'https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_linux',
+};
+
+/**
+ * Helper used to grab a video from a page (TikTok, a course player…). It is
+ * fetched on first use only, so an offline install never downloads anything.
+ */
+async function ytdlpBinary() {
+  const name = process.platform === 'win32' ? 'yt-dlp.exe' : 'yt-dlp';
+  const target = path.join(app.getPath('userData'), 'bin', name);
+  if (fs.existsSync(target)) return target;
+
+  const source = YTDLP_URLS[process.platform];
+  if (!source) return null;
+  const response = await fetch(source);
+  if (!response.ok || !response.body) return null;
+
+  await fsp.mkdir(path.dirname(target), { recursive: true });
+  const temporary = `${target}.part`;
+  await fsp.writeFile(temporary, Buffer.from(await response.arrayBuffer()));
+  await fsp.rename(temporary, target);
+  if (process.platform !== 'win32') await fsp.chmod(target, 0o755);
+  return target;
+}
+
+function safeName(name) {
+  const cleaned = name.replace(/[\\/:*?"<>|]+/g, ' ').replace(/\s+/g, ' ').trim();
+  return cleaned.slice(0, 120) || 'video';
+}
+
+/** Direct file links are downloaded as-is, which also works for audio. */
+async function downloadDirect(url, dir, onProgress) {
+  const response = await fetch(url, { redirect: 'follow' });
+  if (!response.ok || !response.body) throw new Error(`Téléchargement refusé (${response.status})`);
+
+  const disposition = response.headers.get('Content-Disposition') ?? '';
+  const fromHeader = /filename\*?=(?:UTF-8'')?"?([^";]+)"?/i.exec(disposition)?.[1];
+  const fromUrl = decodeURIComponent(new URL(url).pathname.split('/').pop() ?? '');
+  let name = safeName(fromHeader ?? fromUrl);
+  if (!MEDIA_EXTENSIONS.has(path.extname(name).toLowerCase())) {
+    const type = response.headers.get('Content-Type') ?? '';
+    name += type.startsWith('audio/') ? '.mp3' : '.mp4';
+  }
+
+  const total = Number(response.headers.get('Content-Length') ?? '0');
+  const target = path.join(dir, name);
+  const handle = await fsp.open(target, 'w');
+  let written = 0;
+  try {
+    for await (const chunk of response.body) {
+      await handle.write(chunk);
+      written += chunk.length;
+      if (total > 0) onProgress(Math.min(99, Math.round((written / total) * 100)));
+    }
+  } finally {
+    await handle.close();
+  }
+  return target;
+}
+
+/** Pages are handed to yt-dlp, which finds the real video stream. */
+async function downloadPage(url, dir, onProgress) {
+  const binary = await ytdlpBinary();
+  if (!binary) throw new Error("Ce lien n'est pas un fichier vidéo direct");
+
+  const ffmpeg = ffmpegPath();
+  const args = [
+    '--no-playlist',
+    '--newline',
+    '--no-part',
+    '-f', 'bv*+ba/b',
+    '--merge-output-format', 'mp4',
+    ...(ffmpeg ? ['--ffmpeg-location', path.dirname(ffmpeg)] : []),
+    '--print', 'after_move:filepath',
+    '-o', path.join(dir, '%(title).120B.%(ext)s'),
+    url,
+  ];
+
+  return new Promise((resolve, reject) => {
+    const child = spawn(binary, args, { stdio: ['ignore', 'pipe', 'pipe'] });
+    let produced = '';
+    let error = '';
+    child.stdout.setEncoding('utf8');
+    child.stdout.on('data', (text) => {
+      for (const line of text.split('\n')) {
+        const percent = /\[download\]\s+(\d+(?:\.\d+)?)%/.exec(line);
+        if (percent) onProgress(Math.min(99, Math.round(Number(percent[1]))));
+        else if (line.trim() && !line.startsWith('[')) produced = line.trim();
+      }
+    });
+    child.stderr.setEncoding('utf8');
+    child.stderr.on('data', (text) => {
+      error += text;
+    });
+    child.on('error', reject);
+    child.on('close', (code) => {
+      if (code === 0 && produced) resolve(produced);
+      else reject(new Error(error.split('\n').find((line) => line.includes('ERROR')) ?? 'Téléchargement impossible'));
+    });
+  });
+}
+
 function registerIpc() {
+  /**
+   * Downloads the video behind a pasted link into the Fox Media folder and
+   * returns the entry the library needs, so it appears right away.
+   */
+  ipcMain.handle('fox:download', async (event, url) => {
+    if (typeof url !== 'string' || !/^https?:\/\//i.test(url)) throw new Error('Lien invalide');
+
+    const dir = downloadDir();
+    await fsp.mkdir(dir, { recursive: true });
+    allowedRoots.add(path.resolve(dir));
+
+    const onProgress = (percent) => {
+      if (!event.sender.isDestroyed()) event.sender.send('fox:download-progress', percent);
+    };
+
+    const direct = MEDIA_EXTENSIONS.has(path.extname(new URL(url).pathname).toLowerCase());
+    const target = direct
+      ? await downloadDirect(url, dir, onProgress)
+      : await downloadPage(url, dir, onProgress);
+
+    const stat = await fsp.stat(target);
+    onProgress(100);
+    return {
+      path: target,
+      name: path.basename(target),
+      size: stat.size,
+      lastModified: stat.mtimeMs,
+    };
+  });
+
+  ipcMain.handle('fox:open-folder', async () => {
+    const dir = downloadDir();
+    await fsp.mkdir(dir, { recursive: true });
+    await shell.openPath(dir);
+  });
+
+
   ipcMain.handle('fox:pick-folder', async (event) => {
     const window = BrowserWindow.fromWebContents(event.sender);
     const result = await dialog.showOpenDialog(window, {

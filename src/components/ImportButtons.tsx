@@ -4,12 +4,13 @@ import { isDesktop } from '../lib/native';
 interface Props {
   onFiles: (files: File[]) => void;
   onNative: (mode: 'folder' | 'files') => void;
+  onLink?: () => void;
   scanning: boolean;
   compact?: boolean;
 }
 
 /** Desktop uses the native picker (real paths); the web build falls back to file inputs. */
-export function ImportButtons({ onFiles, onNative, scanning, compact = false }: Props) {
+export function ImportButtons({ onFiles, onNative, onLink, scanning, compact = false }: Props) {
   const native = isDesktop();
   const folderInput = useRef<HTMLInputElement | null>(null);
   const fileInput = useRef<HTMLInputElement | null>(null);
@@ -38,6 +39,11 @@ export function ImportButtons({ onFiles, onNative, scanning, compact = false }: 
       >
         Choisir des fichiers
       </button>
+      {onLink && (
+        <button type="button" className="button" onClick={onLink}>
+          Coller un lien
+        </button>
+      )}
       <input
         ref={folderInput}
         type="file"

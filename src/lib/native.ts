@@ -23,6 +23,11 @@ export interface FoxNative {
   readLicence: () => Promise<string | null>;
   writeLicence: (contents: string) => Promise<void>;
   openExternal: (url: string) => Promise<void>;
+  /** Downloads the video behind a pasted link and returns the saved file. */
+  download?: (url: string) => Promise<NativeEntry>;
+  openDownloads?: () => Promise<void>;
+  /** Subscribes to the percentage of the running download; returns the unsubscribe. */
+  onDownloadProgress?: (listener: (percent: number) => void) => () => void;
 }
 
 declare global {

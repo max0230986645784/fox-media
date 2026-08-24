@@ -10,6 +10,7 @@ interface Props {
   scanning: boolean;
   onFiles: (files: File[]) => void;
   onNative: (mode: 'folder' | 'files') => void;
+  onLink: () => void;
   onEqualizer: () => void;
   onLicence: () => void;
   onAccount: () => void;
@@ -35,6 +36,7 @@ export function SettingsSheet({
   scanning,
   onFiles,
   onNative,
+  onLink,
   onEqualizer,
   onLicence,
   onAccount,
@@ -93,7 +95,12 @@ export function SettingsSheet({
         </div>
 
         <h3>Bibliothèque</h3>
-        <ImportButtons onFiles={onFiles} onNative={onNative} scanning={scanning} />
+        <ImportButtons
+          onFiles={onFiles}
+          onNative={onNative}
+          onLink={onLink}
+          scanning={scanning}
+        />
 
         <h3>Audio</h3>
         <button type="button" className="settings-row" onClick={onEqualizer}>
@@ -157,7 +164,7 @@ export function SettingsSheet({
                 if (!onOwner(code)) setCode('');
               }}
             >
-              Ouvrir mon porte-monnaie
+              Ouvrir MoneyFox
             </button>
           </div>
         )}

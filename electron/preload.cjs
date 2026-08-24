@@ -12,4 +12,11 @@ contextBridge.exposeInMainWorld('foxNative', {
   readLicence: () => ipcRenderer.invoke('fox:store-read'),
   writeLicence: (contents) => ipcRenderer.invoke('fox:store-write', contents),
   openExternal: (url) => ipcRenderer.invoke('fox:open-external', url),
+  download: (url) => ipcRenderer.invoke('fox:download', url),
+  openDownloads: () => ipcRenderer.invoke('fox:open-folder'),
+  onDownloadProgress: (listener) => {
+    const handler = (_event, percent) => listener(percent);
+    ipcRenderer.on('fox:download-progress', handler);
+    return () => ipcRenderer.removeListener('fox:download-progress', handler);
+  },
 });

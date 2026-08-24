@@ -5,6 +5,7 @@ interface Props {
 
 export type IconName =
   | 'search'
+  | 'wallet'
   | 'sort'
   | 'settings'
   | 'play'
@@ -109,6 +110,8 @@ const PATHS: Record<IconName, string> = {
   rewind: 'M11 12l9-6v12l-9-6zm-9 0l9-6v12l-9-6z',
   forward: 'M13 12L4 6v12l9-6zm9 0l-9-6v12l9-6z',
   pip: 'M3 4h18a1 1 0 011 1v14a1 1 0 01-1 1H3a1 1 0 01-1-1V5a1 1 0 011-1zm1 2v12h16V6H4zm8 5h7v6h-7v-6z',
+  wallet:
+    'M4 5h13a1 1 0 011 1v2h2a1 1 0 011 1v9a1 1 0 01-1 1H4a2 2 0 01-2-2V7a2 2 0 012-2zm0 2v10h15v-7H9a1 1 0 010-2h8V7H4zm12 5h2v2h-2v-2z',
 };
 
 export function Icon({ name, size = 22 }: Props) {

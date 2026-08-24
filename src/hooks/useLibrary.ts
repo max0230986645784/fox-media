@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { MediaItem } from '../types';
 import { clearItems, deleteItem, loadItems, saveItems } from '../lib/db';
 import { scanFiles, scanNativeEntries } from '../lib/scan';
-import { nativeBridge } from '../lib/native';
+import { nativeBridge, type NativeEntry } from '../lib/native';
 
 export interface ScanPreview {
   /** Media found by the scan and not already in the library. */
@@ -27,6 +27,10 @@ export interface Library {
   importSelection: (ids: string[]) => Promise<number>;
   /** Merges entries restored from a Drive backup, keeping existing ones. */
   mergeItems: (restored: MediaItem[]) => Promise<number>;
+  /** Adds files already on disk (desktop downloads) without asking again. */
+  addNativeEntries: (entries: NativeEntry[]) => Promise<number>;
+  /** Adds in-memory files (browser downloads) without asking again. */
+  addFiles: (picked: File[]) => Promise<number>;
   cancelPreview: () => void;
   updateItem: (id: string, patch: Partial<MediaItem>) => void;
   removeItem: (id: string) => void;
@@ -167,6 +171,29 @@ export function useLibrary(): Library {
     return fresh.length;
   }, []);
 
+  const addNativeEntries = useCallback(async (entries: NativeEntry[]) => {
+    const scanned = await scanNativeEntries(entries);
+    const fresh = scanned.filter((item) => !knownIds.current.has(item.id));
+    if (fresh.length === 0) return 0;
+    setItems((current) => [...current, ...fresh]);
+    await saveItems(fresh);
+    return fresh.length;
+  }, []);
+
+  const addFiles = useCallback(async (picked: File[]) => {
+    const result = await scanFiles(picked);
+    const fresh = result.items.filter((item) => !knownIds.current.has(item.id));
+    for (const item of fresh) {
+      const file = result.files.get(item.id);
+      if (file) files.current.set(item.id, file);
+    }
+    if (fresh.length === 0) return 0;
+    setAvailableIds(new Set(files.current.keys()));
+    setItems((current) => [...current, ...fresh]);
+    await saveItems(fresh);
+    return fresh.length;
+  }, []);
+
   const updateItem = useCallback((id: string, patch: Partial<MediaItem>) => {
     setItems((current) => {
       const next = current.map((item) => (item.id === id ? { ...item, ...patch } : item));
@@ -240,6 +267,8 @@ export function useLibrary(): Library {
     scanNativeForPreview,
     importSelection,
     mergeItems,
+    addNativeEntries,
+    addFiles,
     cancelPreview,
     updateItem,
     removeItem,

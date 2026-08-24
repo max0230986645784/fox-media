@@ -1535,6 +1535,37 @@ button.video-text {
   flex-wrap: wrap;
 }
 
+.licence-error {
+  font-size: 14px;
+  line-height: 1.5;
+  color: #ff6b6b;
+}
+
+.download-progress {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 22px;
+  margin: 10px 0;
+  border-radius: 11px;
+  background: var(--surface-2, rgba(255, 255, 255, 0.08));
+  overflow: hidden;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.download-bar {
+  position: absolute;
+  inset: 0 auto 0 0;
+  background: var(--accent);
+  transition: width 0.2s linear;
+}
+
+.download-progress span {
+  position: relative;
+}
+
 .toast {
   position: fixed;
   left: 50%;
@@ -1805,6 +1836,7 @@ button.video-text {
 
 .wallet-totals {
   display: flex;
+  flex-wrap: wrap;
   gap: 10px;
 }
 
@@ -1839,6 +1871,27 @@ button.video-text {
   background: rgba(255, 255, 255, 0.05);
   color: inherit;
   font-size: 14px;
+}
+
+.wallet-qr {
+  display: grid;
+  justify-items: center;
+  gap: 8px;
+  text-align: center;
+}
+
+.wallet-qr img {
+  width: 180px;
+  height: 180px;
+  border-radius: 14px;
+  background: #fff;
+  padding: 8px;
+}
+
+.wallet-plans {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 
 .wallet-list {

@@ -88,3 +88,9 @@ export const OWNER_CODE = import.meta.env.VITE_OWNER_CODE ?? 'fox-patron';
 
 /** Payment link where advertisers pay you (PayPal.me or Stripe link). */
 export const ADS_PAYMENT_URL = import.meta.env.VITE_ADS_PAYMENT_URL ?? '';
+
+/**
+ * MoneyFox payout link: your PayPal.me or Stripe page. It feeds the QR code
+ * people scan to pay you and the "Retirer" shortcut.
+ */
+export const PAYOUT_URL = import.meta.env.VITE_PAYOUT_URL ?? '';
