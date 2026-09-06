@@ -7,7 +7,6 @@
   "main": "main.cjs",
   "scripts": {
     "start": "electron .",
-    "icon": "python3 scripts/make-icon.py",
     "dist:win": "electron-builder --win",
     "lint": "node --check main.cjs && node --check booster.cjs && node --check preload.cjs && node --check ui/app.js"
   },
@@ -28,7 +27,7 @@
       "target": [
         "nsis"
       ],
-      "icon": "build/icon.png",
+      "icon": "build/icon.ico",
       "requestedExecutionLevel": "requireAdministrator",
       "signAndEditExecutable": true
     },
