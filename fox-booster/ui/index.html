@@ -1,0 +1,156 @@
+<!doctype html>
+<html lang="fr">
+  <head>
+    <meta charset="UTF-8" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self'; script-src 'self'; img-src 'self' data:" />
+    <title>Fox Booster</title>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <header class="top">
+      <div class="brand">
+        <img src="../build/icon.png" alt="" class="logo" />
+        <div>
+          <h1>Fox Booster</h1>
+          <p class="sub">Réseau plus stable · ping plus bas · FPS boostés</p>
+        </div>
+      </div>
+      <div class="badges">
+        <span id="admin-badge" class="badge warn">Vérification…</span>
+        <span id="version" class="badge muted"></span>
+      </div>
+    </header>
+
+    <main>
+      <section class="hero">
+        <button id="boost-btn" class="boost">
+          <span class="ring"></span>
+          <span class="label">BOOST</span>
+          <span class="hint" id="boost-hint">Cliquer pour optimiser</span>
+        </button>
+        <div class="hero-side">
+          <div class="stat">
+            <span class="k">Ping</span>
+            <span class="v" id="ping-now">— ms</span>
+            <span class="d" id="ping-detail">en attente…</span>
+          </div>
+          <div class="stat">
+            <span class="k">Jitter (stabilité)</span>
+            <span class="v" id="jitter">— ms</span>
+            <span class="d" id="jitter-detail">plus c'est bas, plus c'est stable</span>
+          </div>
+          <div class="stat">
+            <span class="k">Téléchargement</span>
+            <span class="v" id="down">0 Mb/s</span>
+            <span class="d" id="up">↑ 0 Mb/s</span>
+          </div>
+          <div class="stat">
+            <span class="k">Jeu détecté</span>
+            <span class="v small" id="game">aucun</span>
+            <span class="d">priorité Haute automatique</span>
+          </div>
+        </div>
+      </section>
+
+      <section class="card">
+        <div class="card-head">
+          <h2>Ping en direct</h2>
+          <span id="ping-hosts" class="muted"></span>
+        </div>
+        <canvas id="chart" width="900" height="160"></canvas>
+      </section>
+
+      <section class="grid">
+        <div class="card">
+          <div class="card-head"><h2>Réseau &amp; ping</h2></div>
+          <ul id="list-network" class="tweaks"></ul>
+        </div>
+        <div class="card">
+          <div class="card-head"><h2>Téléchargements</h2></div>
+          <ul id="list-download" class="tweaks"></ul>
+        </div>
+        <div class="card">
+          <div class="card-head"><h2>FPS</h2></div>
+          <ul id="list-fps" class="tweaks"></ul>
+        </div>
+        <div class="card">
+          <div class="card-head"><h2>Anti-crash</h2></div>
+          <ul id="list-anticrash" class="tweaks"></ul>
+        </div>
+      </section>
+
+      <section class="card" id="scan-card">
+        <div class="card-head">
+          <h2>Scanner de virus</h2>
+          <span class="muted">Tes dossiers et applications uniquement — Windows et Microsoft ne sont jamais touchés</span>
+        </div>
+        <div class="scan-bar">
+          <button id="scan-btn" class="primary">Analyser mon PC</button>
+          <label class="toggle inline">
+            <input type="checkbox" id="opt-defender" checked />
+            <span>Inclure l'analyse rapide Windows Defender (quelques minutes)</span>
+          </label>
+          <span id="scan-status" class="muted"></span>
+        </div>
+        <div id="scan-results" class="hidden">
+          <div class="scan-actions">
+            <label class="toggle inline"><input type="checkbox" id="select-all" /><span>Tout cocher</span></label>
+            <button id="quarantine-btn" class="danger" disabled>Mettre la sélection en quarantaine</button>
+          </div>
+          <ul id="threats" class="threats"></ul>
+        </div>
+        <details id="quarantine-box">
+          <summary>Quarantaine (<span id="quarantine-count">0</span>)</summary>
+          <ul id="quarantine-list" class="threats"></ul>
+        </details>
+      </section>
+
+      <section class="card">
+        <div class="card-head"><h2>Réglages</h2></div>
+        <div class="settings">
+          <label class="toggle">
+            <input type="checkbox" id="opt-autostart" />
+            <span>Lancer Fox Booster au démarrage de Windows (en arrière-plan)</span>
+          </label>
+          <label class="toggle">
+            <input type="checkbox" id="opt-autoboost" />
+            <span>Appliquer le boost automatiquement à chaque démarrage</span>
+          </label>
+          <label class="toggle">
+            <input type="checkbox" id="opt-anticrash" />
+            <span>Anti-crash : mémoire virtuelle, délai GPU, plein écran (appliqué avec le boost)</span>
+          </label>
+          <label class="toggle">
+            <input type="checkbox" id="opt-hogs" />
+            <span>Fermer les programmes inutiles (OneDrive, Widgets, Game Bar…) quand un jeu tourne</span>
+          </label>
+          <label class="field">
+            <span>DNS rapides</span>
+            <select id="opt-dns">
+              <option value="cloudflare">Cloudflare (1.1.1.1) — recommandé</option>
+              <option value="google">Google (8.8.8.8)</option>
+              <option value="quad9">Quad9 (9.9.9.9)</option>
+              <option value="none">Ne pas toucher aux DNS</option>
+            </select>
+          </label>
+          <label class="field">
+            <span>Serveurs à pinger (max 3, séparés par des virgules)</span>
+            <input type="text" id="opt-hosts" placeholder="1.1.1.1, 8.8.8.8" />
+          </label>
+          <div class="actions">
+            <button id="save-btn" class="secondary">Enregistrer</button>
+            <button id="repair-btn" class="secondary">Réparer les fichiers système (long)</button>
+            <button id="restore-btn" class="danger">Restaurer les réglages Windows</button>
+          </div>
+        </div>
+      </section>
+
+      <p class="foot">
+        Certains réglages (planification GPU, Nagle) prennent effet après un redémarrage.
+        Fox Booster ne peut pas améliorer la ligne de ton opérateur : il enlève ce que Windows met en travers.
+      </p>
+    </main>
+
+    <script src="app.js"></script>
+  </body>
+</html>
