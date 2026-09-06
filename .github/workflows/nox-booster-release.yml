@@ -1,0 +1,30 @@
+name: Nox Booster release
+
+# Construit et publie l'installeur Windows de Nox Booster (dossier nox-booster/)
+# pour chaque tag `nox-v*`, ex. `git tag nox-v1.0.0 && git push --tags`.
+on:
+  push:
+    tags:
+      - 'nox-v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: nox-booster
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: nox-booster/package-lock.json
+      - run: npm ci
+      - run: npm run dist:win -- --publish always
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
