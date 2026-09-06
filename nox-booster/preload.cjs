@@ -6,7 +6,7 @@ const subscribe = (channel) => (callback) => {
   return () => ipcRenderer.removeListener(channel, listener);
 };
 
-contextBridge.exposeInMainWorld('foxBooster', {
+contextBridge.exposeInMainWorld('noxBooster', {
   getState: () => ipcRenderer.invoke('booster:get-state'),
   boost: () => ipcRenderer.invoke('booster:boost'),
   restore: () => ipcRenderer.invoke('booster:restore'),

@@ -58,7 +58,7 @@ function createWindow() {
     minWidth: 820,
     minHeight: 600,
     backgroundColor: '#0b0b12',
-    title: 'Fox Booster',
+    title: 'Nox Booster',
     icon: path.join(__dirname, 'build', 'icon.png'),
     autoHideMenuBar: true,
     show: !process.argv.includes('--hidden'),
@@ -81,10 +81,10 @@ function createTray() {
   const icon = nativeImage.createFromPath(path.join(__dirname, 'build', 'icon.png')).resize({ width: 16, height: 16 });
   tray = new Tray(icon);
   const refresh = () => {
-    tray.setToolTip(state.boosted ? 'Fox Booster : boost actif' : 'Fox Booster : en veille');
+    tray.setToolTip(state.boosted ? 'Nox Booster : boost actif' : 'Nox Booster : en veille');
     tray.setContextMenu(
       Menu.buildFromTemplate([
-        { label: 'Ouvrir Fox Booster', click: () => win.show() },
+        { label: 'Ouvrir Nox Booster', click: () => win.show() },
         { label: state.boosted ? 'Boost actif' : 'Lancer le boost', enabled: !state.boosted && !state.boosting, click: () => boost() },
         { type: 'separator' },
         { label: 'Quitter', click: () => { quitting = true; app.quit(); } },
@@ -111,7 +111,7 @@ async function boost() {
     }
   }
   state.lastReport = report;
-  state.boosted = report.some((entry) => entry.ok);
+  state.boosted = report.some((entry) => entry.ok || entry.skipped);
   state.lastBoostAt = Date.now();
   state.boosting = false;
   refreshTray();

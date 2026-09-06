@@ -1,4 +1,4 @@
-const api = window.foxBooster;
+const api = window.noxBooster;
 const $ = (id) => document.getElementById(id);
 
 const history = [];
@@ -71,7 +71,7 @@ function renderState(state) {
   $('boost-hint').textContent = state.boosting
     ? 'Optimisation en cours…'
     : state.boosted
-      ? 'Boost actif · cliquer pour réappliquer'
+      ? state.platform === 'win32' ? 'Boost actif · cliquer pour réappliquer' : 'Aperçu : rien appliqué hors Windows'
       : 'Cliquer pour optimiser';
   $('version').textContent = `v${state.version}`;
   const admin = $('admin-badge');
@@ -87,7 +87,7 @@ function renderState(state) {
   }
   $('game').textContent = state.games.length ? state.games.join(', ') : 'aucun';
   for (const entry of state.lastReport) markProgress(entry);
-  if (!state.boosted && !state.boosting) {
+  if (!state.lastReport.length && !state.boosting) {
     document.querySelectorAll('.tweaks li').forEach((li) => li.classList.remove('ok', 'ko', 'skip'));
   }
   $('opt-autostart').checked = state.settings.autoStart;
@@ -153,8 +153,8 @@ function drawChart() {
   }
 
   const gradient = ctx.createLinearGradient(0, 0, 0, height);
-  gradient.addColorStop(0, 'rgba(255, 122, 26, 0.45)');
-  gradient.addColorStop(1, 'rgba(255, 122, 26, 0)');
+  gradient.addColorStop(0, 'rgba(139, 92, 246, 0.45)');
+  gradient.addColorStop(1, 'rgba(139, 92, 246, 0)');
   ctx.beginPath();
   let started = false;
   history.forEach((ms, index) => {
@@ -168,7 +168,7 @@ function drawChart() {
       ctx.lineTo(x, y);
     }
   });
-  ctx.strokeStyle = '#ff9a3c';
+  ctx.strokeStyle = '#a78bfa';
   ctx.lineWidth = 2;
   ctx.stroke();
   ctx.lineTo((history.length - 1) * step, height);

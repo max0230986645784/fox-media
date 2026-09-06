@@ -1,4 +1,4 @@
-"""Génère build/icon.png (512x512) : un éclair sur fond dégradé orange Fox."""
+"""Génère build/icon.png (512x512) : un éclair sur fond dégradé violet nuit Nox."""
 from pathlib import Path
 
 from PIL import Image, ImageDraw
@@ -11,12 +11,12 @@ def main() -> None:
     img = Image.new("RGBA", (SIZE, SIZE), (0, 0, 0, 0))
     draw = ImageDraw.Draw(img)
 
-    # Fond arrondi avec dégradé vertical orange -> rouge-brun.
+    # Fond arrondi avec dégradé vertical violet -> bleu nuit.
     bg = Image.new("RGBA", (SIZE, SIZE), (0, 0, 0, 0))
     bg_draw = ImageDraw.Draw(bg)
     for y in range(SIZE):
         t = y / SIZE
-        color = (int(255 - 60 * t), int(140 - 90 * t), int(40 - 30 * t), 255)
+        color = (int(110 - 60 * t), int(70 - 45 * t), int(220 - 90 * t), 255)
         bg_draw.line([(0, y), (SIZE, y)], fill=color)
     mask = Image.new("L", (SIZE, SIZE), 0)
     ImageDraw.Draw(mask).rounded_rectangle([0, 0, SIZE - 1, SIZE - 1], radius=110, fill=255)
@@ -30,7 +30,7 @@ def main() -> None:
     # Éclair (boost) au centre.
     bolt = [(275, 190), (200, 320), (255, 320), (225, 425), (315, 280), (262, 280), (300, 190)]
     draw.polygon(bolt, fill=(30, 20, 15, 255))
-    draw.polygon([(p[0] - 6, p[1] - 6) for p in bolt], fill=(255, 122, 26, 255))
+    draw.polygon([(p[0] - 6, p[1] - 6) for p in bolt], fill=(196, 181, 253, 255))
 
     OUT.parent.mkdir(parents=True, exist_ok=True)
     img.save(OUT)

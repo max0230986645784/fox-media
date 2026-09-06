@@ -1,4 +1,4 @@
-// Moteur d'optimisation Windows de Fox Booster : réglages réseau (ping, stabilité,
+// Moteur d'optimisation Windows de Nox Booster : réglages réseau (ping, stabilité,
 // téléchargements) et FPS (plan d'alimentation, priorité des jeux, Game Mode).
 // Chaque réglage sait s'appliquer et se restaurer aux valeurs Windows par défaut.
 const { exec, execFile } = require('node:child_process');
@@ -493,7 +493,7 @@ function isProtectedPath(target) {
   if (p.startsWith(windir)) return true;
   if (p.includes('\\windowsapps\\') || p.includes('\\microsoft\\edge\\') || p.includes('\\microsoft\\onedrive\\')) return true;
   if (programFiles.some((dir) => p.startsWith(`${dir}\\microsoft`) || p.startsWith(`${dir}\\windows`))) return true;
-  if (p.includes('\\foxbooster\\quarantine\\')) return true;
+  if (p.includes('\\noxbooster\\quarantine\\')) return true;
   return false;
 }
 
@@ -676,7 +676,7 @@ async function scanThreats(options, onProgress) {
 }
 
 function quarantineDir() {
-  return path.join(process.env.LOCALAPPDATA || process.env.HOME || '.', 'FoxBooster', 'Quarantine');
+  return path.join(process.env.LOCALAPPDATA || process.env.HOME || '.', 'NoxBooster', 'Quarantine');
 }
 
 /** Met en quarantaine les éléments cochés : fichiers déplacés, entrées Run supprimées (sauvegardées). */

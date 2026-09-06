@@ -1,4 +1,4 @@
-# Fox Booster
+# Nox Booster
 
 Booster PC gaming pour Windows : ping plus bas, réseau plus stable, téléchargements
 plus rapides, FPS boostés, anti-crash et scanner de virus. Tourne en arrière-plan
@@ -25,7 +25,7 @@ plus rapides, FPS boostés, anti-crash et scanner de virus. Tourne en arrière-p
 ## Développement
 
 ```bash
-cd fox-booster
+cd nox-booster
 npm install
 npm start          # lance l'app (les optimisations n'agissent que sous Windows)
 npm run lint
@@ -35,10 +35,10 @@ npm run dist:win   # installeur Windows dans release/
 ## Publier l'installeur pour un pote
 
 ```bash
-git tag booster-v1.0.0
+git tag nox-v1.0.0
 git push --tags
 ```
 
-GitHub Actions construit `FoxBooster-Setup-1.0.0.exe` et le publie dans les Releases
+GitHub Actions construit `NoxBooster-Setup-1.0.0.exe` et le publie dans les Releases
 du dépôt. L'installeur demande les droits administrateur (nécessaires pour les
 réglages réseau).
