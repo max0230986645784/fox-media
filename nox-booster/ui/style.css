@@ -100,13 +100,14 @@ canvas { width: 100%; height: 160px; display: block; }
 
 .scan-bar { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
 .scan-actions { display: flex; align-items: center; justify-content: space-between; margin: 14px 0 8px; }
-.hidden { display: none; }
+.hidden { display: none !important; }
 .threats { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
 .threats li {
   display: grid; grid-template-columns: 22px 1fr auto; gap: 10px; align-items: center;
   padding: 10px 12px; border-radius: 10px; background: var(--card-2); font-size: 13px;
 }
 .threats li.handled { opacity: 0.6; }
+.threats li.empty, .threats li.muted { display: block; }
 .threats .name { font-weight: 600; }
 .threats .path { color: var(--muted); font-size: 11px; word-break: break-all; }
 .threats .reason { color: #d5d5e2; font-size: 12px; }
@@ -117,6 +118,22 @@ canvas { width: 100%; height: 160px; display: block; }
 .empty { color: var(--ok); font-size: 14px; padding: 10px 0; }
 details summary { cursor: pointer; color: var(--muted); font-size: 13px; margin-top: 12px; }
 .threats button.mini { padding: 4px 8px; font-size: 11px; border-radius: 6px; }
+
+.speed-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 12px; }
+.speed-grid .stat { padding: 10px 12px; }
+.gauge { height: 8px; border-radius: 999px; background: var(--card-2); overflow: hidden; margin-bottom: 12px; }
+.gauge-fill { height: 100%; width: 0; border-radius: 999px; background: linear-gradient(90deg, var(--nox), var(--nox-2)); transition: width 0.25s; }
+#vpn-card { display: grid; gap: 10px; align-content: start; }
+#vpn-card .card-head { margin-bottom: 0; }
+.vpn-ip { display: grid; gap: 2px; padding: 10px 12px; border-radius: 12px; background: var(--card-2); }
+.vpn-ip .k { color: var(--muted); font-size: 12px; }
+.vpn-ip .v { font-size: 20px; font-weight: 700; }
+.vpn-ip .d { color: var(--muted); font-size: 12px; }
+.vpn-note { margin: 0; line-height: 1.4; }
+.badge.on { background: #133d2a; color: var(--ok); }
+.badge.busy { background: #3d2f13; color: var(--warn); }
+.guide summary { color: var(--text); font-size: 14px; font-weight: 600; margin: 0; }
+.guide ol { margin: 12px 0 0; padding-left: 20px; color: #d5d5e2; font-size: 13px; line-height: 1.5; display: grid; gap: 6px; }
 
 .settings { display: grid; gap: 12px; }
 .toggle { display: flex; align-items: center; gap: 10px; font-size: 14px; cursor: pointer; }

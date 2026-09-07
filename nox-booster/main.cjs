@@ -1,7 +1,9 @@
-const { app, BrowserWindow, Menu, Tray, ipcMain, nativeImage, shell } = require('electron');
+const { app, BrowserWindow, Menu, Tray, ipcMain, nativeImage, net, shell } = require('electron');
 const fs = require('node:fs');
 const path = require('node:path');
 const booster = require('./booster.cjs');
+const vpn = require('./vpn.cjs');
+const { speedTest } = require('./speedtest.cjs');
 
 const DEFAULT_SETTINGS = {
   autoStart: true,
@@ -10,6 +12,8 @@ const DEFAULT_SETTINGS = {
   closeHogs: true,
   dns: 'cloudflare',
   pingHosts: ['1.1.1.1', '8.8.8.8'],
+  vpnCountry: 'FR',
+  vpnMode: 'vpn',
 };
 
 const settingsFile = () => path.join(app.getPath('userData'), 'settings.json');
@@ -213,11 +217,29 @@ ipcMain.handle('booster:save-settings', (_event, next) => {
     closeHogs: Boolean(next.closeHogs),
     dns: booster.DNS_PROFILES[next.dns] ? next.dns : 'none',
     pingHosts: hosts.length ? hosts : DEFAULT_SETTINGS.pingHosts,
+    vpnCountry: /^[A-Z]{2}$/.test(String(next.vpnCountry)) ? next.vpnCountry : settings.vpnCountry,
+    vpnMode: next.vpnMode === 'proxy' ? 'proxy' : 'vpn',
   };
   saveSettings(settings);
   applyAutoStart();
   return settings;
 });
+// net.fetch passe par le proxy système : l'IP affichée est bien celle vue par les navigateurs.
+const ipFetcher = (url, options) => net.fetch(url, options);
+ipcMain.handle('vpn:servers', async (_event, force) => {
+  const { servers, ...list } = await vpn.listServers(Boolean(force));
+  return list;
+});
+ipcMain.handle('vpn:status', () => vpn.status(ipFetcher));
+ipcMain.handle('vpn:connect', async (_event, options) => {
+  const country = String(options && options.country || settings.vpnCountry).toUpperCase();
+  const mode = options && options.mode === 'proxy' ? 'proxy' : 'vpn';
+  settings = { ...settings, vpnCountry: country, vpnMode: mode };
+  saveSettings(settings);
+  return vpn.connect({ country, mode }, (step) => send('vpn:progress', step), ipFetcher);
+});
+ipcMain.handle('vpn:disconnect', () => vpn.disconnect((step) => send('vpn:progress', step), ipFetcher));
+ipcMain.handle('booster:speedtest', () => speedTest((step) => send('booster:speedtest-progress', step)));
 ipcMain.handle('booster:open-external', (_event, url) => {
   if (/^https:\/\//.test(url)) shell.openExternal(url);
 });
@@ -242,6 +264,13 @@ if (!gotLock) {
 
   app.on('before-quit', () => {
     quitting = true;
+  });
+
+  app.on('will-quit', (event) => {
+    if (vpn.hasSession()) {
+      event.preventDefault();
+      vpn.disconnect().finally(() => app.exit(0));
+    }
   });
 
   app.on('window-all-closed', (event) => {

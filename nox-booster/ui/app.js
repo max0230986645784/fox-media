@@ -284,6 +284,132 @@ async function runQuarantine() {
     : `${done.size} élément(s) mis en quarantaine (restaurables plus bas).`;
 }
 
+// ---- Speed test --------------------------------------------------------------
+
+const mbps = (bitsPerSecond) => (bitsPerSecond / 1e6).toFixed(bitsPerSecond >= 1e8 ? 0 : 1);
+
+function renderSpeedProgress(step) {
+  if (step.phase === 'latency') {
+    $('speed-status').textContent = 'Mesure de la latence…';
+    if (step.value !== null) $('speed-ping').textContent = step.value;
+  } else {
+    const isDown = step.phase === 'down';
+    $('speed-status').textContent = isDown ? 'Téléchargement en cours…' : 'Envoi en cours…';
+    $(isDown ? 'speed-down' : 'speed-up').textContent = mbps(step.value);
+    $('speed-bar').style.width = `${Math.min(100, (step.value / 1e9) * 100 + 5)}%`;
+  }
+}
+
+async function runSpeedTest() {
+  const button = $('speed-btn');
+  button.disabled = true;
+  for (const id of ['speed-down', 'speed-up', 'speed-ping']) $(id).textContent = '…';
+  $('speed-jitter').textContent = 'ms';
+  $('speed-bar').style.width = '0%';
+  const result = await api.speedTest();
+  button.disabled = false;
+  if (!result) {
+    $('speed-status').textContent = 'Un test est déjà en cours.';
+    return;
+  }
+  $('speed-down').textContent = mbps(result.down);
+  $('speed-up').textContent = mbps(result.up);
+  $('speed-ping').textContent = result.latency.ms === null ? 'perte' : result.latency.ms;
+  $('speed-jitter').textContent = result.latency.jitter === null ? 'ms' : `ms · jitter ${result.latency.jitter} ms`;
+  $('speed-bar').style.width = '100%';
+  $('speed-status').textContent = `${result.server} · ${new Date(result.at).toLocaleTimeString('fr-FR')}`;
+}
+
+// ---- Nox VPN -----------------------------------------------------------------
+
+let vpnServers = null;
+let vpnBusy = false;
+
+function fillCountries() {
+  const select = $('vpn-country');
+  const mode = $('vpn-mode').value;
+  const wanted = select.value || (currentState && currentState.settings.vpnCountry) || 'FR';
+  select.replaceChildren();
+  if (!vpnServers || !vpnServers.countries.length) {
+    select.append(new Option(vpnServers && vpnServers.errors.length ? 'Serveurs indisponibles (hors ligne ?)' : 'Chargement des serveurs…', ''));
+    return;
+  }
+  const list = vpnServers.countries.filter((country) => country[mode] > 0);
+  for (const country of list) {
+    select.append(new Option(`${country.name} · ${country[mode]} serveur${country[mode] > 1 ? 's' : ''}`, country.code));
+  }
+  if (!list.length) select.append(new Option('Aucun serveur pour ce mode, réessaie plus tard', ''));
+  select.value = list.some((country) => country.code === wanted) ? wanted : list.length ? list[0].code : '';
+  const other = mode === 'vpn' ? 'proxy' : 'vpn';
+  const missing = (currentState && currentState.settings.vpnCountry) || 'FR';
+  if (select.value !== missing && vpnServers.countries.some((country) => country.code === missing && country[other] > 0)) {
+    $('vpn-status').textContent = `${vpnServers.countries.find((country) => country.code === missing).name} : dispo dans l'autre mode`;
+  }
+}
+
+async function loadVpnServers(force = false) {
+  $('vpn-refresh').disabled = true;
+  vpnServers = await api.vpnServers(force);
+  $('vpn-refresh').disabled = false;
+  fillCountries();
+  if (vpnServers.errors.length) $('vpn-status').textContent = vpnServers.errors.join(' · ');
+  else if (!$('vpn-status').textContent) $('vpn-status').textContent = `${vpnServers.total} serveurs gratuits trouvés dans ${vpnServers.countries.length} pays`;
+}
+
+function renderVpn(status) {
+  const badge = $('vpn-badge');
+  const button = $('vpn-btn');
+  const country = status.country ? (vpnServers && vpnServers.countries.find((c) => c.code === status.country)) : null;
+  if (status.connecting || vpnBusy) {
+    badge.textContent = 'Connexion…';
+    badge.className = 'badge busy';
+  } else if (status.connected) {
+    badge.textContent = `Connecté · ${country ? country.name : status.country}${status.mode === 'proxy' ? ' (navigateur)' : ''}`;
+    badge.className = 'badge on';
+  } else {
+    badge.textContent = 'Déconnecté';
+    badge.className = 'badge muted';
+  }
+  button.textContent = status.connected ? 'Se déconnecter' : 'Se connecter';
+  button.classList.toggle('primary', !status.connected);
+  button.classList.toggle('danger', status.connected);
+  button.disabled = Boolean(status.connecting || vpnBusy);
+  $('vpn-country').disabled = Boolean(status.connected);
+  $('vpn-mode').disabled = Boolean(status.connected);
+  if (status.ip) {
+    $('vpn-ip').textContent = status.ip.ip;
+    $('vpn-ip-where').textContent = `${status.ip.city ? `${status.ip.city}, ` : ''}${status.ip.countryName}`;
+  } else {
+    $('vpn-ip').textContent = 'IP inconnue';
+    $('vpn-ip-where').textContent = 'pas de connexion Internet ?';
+  }
+  if (status.error) $('vpn-status').textContent = status.error;
+  else if (status.connected && status.server) $('vpn-status').textContent = `Serveur ${status.server.ip}${status.server.port ? `:${status.server.port}` : ''}`;
+}
+
+async function toggleVpn() {
+  if (vpnBusy) return;
+  vpnBusy = true;
+  const status = await api.vpnStatus();
+  renderVpn(status);
+  let next;
+  if (status.connected) {
+    next = await api.vpnDisconnect();
+    $('vpn-status').textContent = 'Déconnecté, IP d’origine rétablie.';
+  } else {
+    const country = $('vpn-country').value;
+    if (!country) {
+      vpnBusy = false;
+      renderVpn(status);
+      return;
+    }
+    $('vpn-status').textContent = 'Recherche du meilleur serveur…';
+    next = await api.vpnConnect({ country, mode: $('vpn-mode').value });
+  }
+  vpnBusy = false;
+  renderVpn(next);
+}
+
 // ---- Boutons -----------------------------------------------------------------
 
 $('boost-btn').addEventListener('click', async () => {
@@ -324,6 +450,10 @@ $('save-btn').addEventListener('click', async () => {
   setTimeout(() => { button.textContent = 'Enregistrer'; }, 1500);
 });
 
+$('speed-btn').addEventListener('click', runSpeedTest);
+$('vpn-btn').addEventListener('click', toggleVpn);
+$('vpn-refresh').addEventListener('click', () => loadVpnServers(true));
+$('vpn-mode').addEventListener('change', fillCountries);
 $('scan-btn').addEventListener('click', runScan);
 $('quarantine-btn').addEventListener('click', runQuarantine);
 $('select-all').addEventListener('change', (event) => {
@@ -335,10 +465,15 @@ api.onStatus(renderState);
 api.onProgress(markProgress);
 api.onMetrics(renderMetrics);
 api.onScanProgress((step) => { $('scan-status').textContent = step.label; });
+api.onSpeedTestProgress(renderSpeedProgress);
+api.onVpnProgress((step) => { $('vpn-status').textContent = step.label; });
 
 (async () => {
   await renderTweaks();
   renderState(await api.getState());
+  $('vpn-mode').value = currentState.settings.vpnMode;
   renderQuarantine();
   drawChart();
+  loadVpnServers().then(() => api.vpnStatus()).then(renderVpn);
+  setInterval(async () => { if (!vpnBusy) renderVpn(await api.vpnStatus()); }, 30000);
 })();

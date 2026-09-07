@@ -61,6 +61,54 @@
       </section>
 
       <section class="grid">
+        <div class="card" id="speed-card">
+          <div class="card-head">
+            <h2>Speed test</h2>
+            <span id="speed-status" class="muted">serveurs Cloudflare</span>
+          </div>
+          <div class="speed-grid">
+            <div class="stat"><span class="k">Descendant</span><span class="v" id="speed-down">—</span><span class="d">Mb/s</span></div>
+            <div class="stat"><span class="k">Montant</span><span class="v" id="speed-up">—</span><span class="d">Mb/s</span></div>
+            <div class="stat"><span class="k">Latence</span><span class="v" id="speed-ping">—</span><span class="d" id="speed-jitter">ms</span></div>
+          </div>
+          <div class="gauge"><div id="speed-bar" class="gauge-fill"></div></div>
+          <div class="actions">
+            <button id="speed-btn" class="primary">Lancer le speed test</button>
+            <span class="muted">≈ 25 s · ferme les téléchargements avant</span>
+          </div>
+        </div>
+
+        <div class="card" id="vpn-card">
+          <div class="card-head">
+            <h2>Nox VPN</h2>
+            <span id="vpn-badge" class="badge muted">Déconnecté</span>
+          </div>
+          <div class="vpn-ip">
+            <span class="k">Ton IP publique</span>
+            <span class="v small" id="vpn-ip">…</span>
+            <span class="d" id="vpn-ip-where"></span>
+          </div>
+          <label class="field">
+            <span>Pays du serveur</span>
+            <select id="vpn-country"><option value="">Chargement des serveurs…</option></select>
+          </label>
+          <label class="field">
+            <span>Mode</span>
+            <select id="vpn-mode">
+              <option value="vpn">VPN complet — tout le PC (jeux, apps, navigateur)</option>
+              <option value="proxy">Navigateur &amp; apps web — plus de pays disponibles</option>
+            </select>
+          </label>
+          <div class="actions">
+            <button id="vpn-btn" class="primary">Se connecter</button>
+            <button id="vpn-refresh" class="secondary" title="Rechercher de nouveaux serveurs">↻</button>
+            <span id="vpn-status" class="muted"></span>
+          </div>
+          <p class="muted vpn-note">Serveurs gratuits publics (VPN Gate, proxys ouverts) : pratique pour changer de pays, à éviter pour la banque ou les mots de passe. La liste change tous les jours.</p>
+        </div>
+      </section>
+
+      <section class="grid">
         <div class="card">
           <div class="card-head"><h2>Réseau &amp; ping</h2></div>
           <ul id="list-network" class="tweaks"></ul>
@@ -145,8 +193,19 @@
         </div>
       </section>
 
+      <details class="card guide">
+        <summary>Ping le plus bas possible sur Fortnite + booster la PlayStation de ton frère (réglages box)</summary>
+        <ol>
+          <li>Nox Booster n'agit que sur ce PC. La PS5 se booste dans la <b>box</b> : ouvre son interface (192.168.1.1 ou 192.168.0.1) → <b>QoS / Priorité</b> → mets le PC et la PS5 en priorité « Jeu / Haute ».</li>
+          <li>Sur la PS5 : IP fixe (bail DHCP statique dans la box) + <b>UPnP activé</b> ou ports Fortnite ouverts (UDP 5222, 5795-5847, TCP 5222, 5795-5847).</li>
+          <li>Dans Fortnite : Région de matchmaking <b>Europe</b> fixée (pas Auto), « Statistiques réseau » activées pour vérifier. Le ping ne peut pas descendre sous la distance box → serveur Epic (≈ 15-25 ms en France).</li>
+          <li>Sur ce PC (FPS) : Fortnite en <b>Performance</b> (mode rendu), V-Sync off, limite FPS = ton écran ou illimité, pilote GPU à jour, mode Faible latence NVIDIA Reflex activé.</li>
+          <li>Câble : Cat 5e minimum branché directement à la box (pas de switch/CPL entre les deux), Wi-Fi désactivé sur le PC.</li>
+        </ol>
+      </details>
+
       <p class="foot">
-        Certains réglages (planification GPU, Nagle) prennent effet après un redémarrage.
+        Certains réglages (planification GPU, Nagle, timer) prennent effet après un redémarrage.
         Nox Booster ne peut pas améliorer la ligne de ton opérateur : il enlève ce que Windows met en travers.
       </p>
     </main>

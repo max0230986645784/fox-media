@@ -8,7 +8,7 @@
   "scripts": {
     "start": "electron .",
     "dist:win": "electron-builder --win",
-    "lint": "node --check main.cjs && node --check booster.cjs && node --check preload.cjs && node --check ui/app.js"
+    "lint": "node --check main.cjs && node --check booster.cjs && node --check preload.cjs && node --check vpn.cjs && node --check speedtest.cjs && node --check ui/app.js"
   },
   "build": {
     "appId": "app.noxbooster.pc",

@@ -231,6 +231,71 @@ const TWEAKS = [
     },
   },
   {
+    id: 'nic-power',
+    group: 'network',
+    label: "Carte réseau câblée : économie d'énergie coupée, modération d'interruptions off",
+    async apply() {
+      await powershell(
+        "Get-NetAdapter | Where-Object { $_.Status -eq 'Up' -and -not $_.Virtual } | ForEach-Object { " +
+          "Disable-NetAdapterPowerManagement -Name $_.Name -NoRestart -ErrorAction SilentlyContinue; " +
+          "Set-NetAdapterAdvancedProperty -Name $_.Name -DisplayName 'Interrupt Moderation' -DisplayValue 'Disabled' -NoRestart -ErrorAction SilentlyContinue; " +
+          "Set-NetAdapterAdvancedProperty -Name $_.Name -DisplayName 'Energy-Efficient Ethernet' -DisplayValue 'Disabled' -NoRestart -ErrorAction SilentlyContinue; " +
+          "Set-NetAdapterAdvancedProperty -Name $_.Name -DisplayName 'Green Ethernet' -DisplayValue 'Disabled' -NoRestart -ErrorAction SilentlyContinue; " +
+          "Set-NetAdapterAdvancedProperty -Name $_.Name -DisplayName 'Flow Control' -DisplayValue 'Disabled' -NoRestart -ErrorAction SilentlyContinue }",
+        40000,
+      );
+    },
+    async restore() {
+      await powershell(
+        "Get-NetAdapter | Where-Object { $_.Status -eq 'Up' -and -not $_.Virtual } | ForEach-Object { " +
+          "Enable-NetAdapterPowerManagement -Name $_.Name -NoRestart -ErrorAction SilentlyContinue; " +
+          "Reset-NetAdapterAdvancedProperty -Name $_.Name -DisplayName 'Interrupt Moderation','Energy-Efficient Ethernet','Green Ethernet','Flow Control' -NoRestart -ErrorAction SilentlyContinue }",
+        40000,
+      );
+    },
+  },
+  {
+    id: 'core-parking',
+    group: 'fps',
+    label: 'Tous les cœurs CPU actifs (core parking désactivé), boost processeur au max',
+    async apply() {
+      await run('powercfg -setacvalueindex scheme_current sub_processor CPMINCORES 100');
+      await run('powercfg -setacvalueindex scheme_current sub_processor PROCTHROTTLEMIN 100');
+      await run('powercfg -setacvalueindex scheme_current sub_processor PERFBOOSTMODE 2');
+      await run('powercfg -setactive scheme_current');
+    },
+    async restore() {
+      await run('powercfg -setacvalueindex scheme_current sub_processor CPMINCORES 0');
+      await run('powercfg -setacvalueindex scheme_current sub_processor PROCTHROTTLEMIN 5');
+      await run('powercfg -setacvalueindex scheme_current sub_processor PERFBOOSTMODE 1');
+      await run('powercfg -setactive scheme_current');
+    },
+  },
+  {
+    id: 'timer',
+    group: 'fps',
+    label: 'Timer haute résolution et effets visuels Windows réduits (moins de micro-freezes)',
+    async apply() {
+      await run('bcdedit /set useplatformtick yes');
+      await run('bcdedit /deletevalue useplatformclock');
+      await run('bcdedit /set disabledynamictick yes');
+      await reg('HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\VisualEffects', 'VisualFXSetting', 'REG_DWORD', 2);
+      await reg('HKCU\\Control Panel\\Desktop', 'MenuShowDelay', 'REG_SZ', 0);
+      await reg('HKCU\\Control Panel\\Mouse', 'MouseSpeed', 'REG_SZ', 0);
+      await reg('HKCU\\Control Panel\\Mouse', 'MouseThreshold1', 'REG_SZ', 0);
+      await reg('HKCU\\Control Panel\\Mouse', 'MouseThreshold2', 'REG_SZ', 0);
+    },
+    async restore() {
+      await run('bcdedit /deletevalue useplatformtick');
+      await run('bcdedit /deletevalue disabledynamictick');
+      await reg('HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\VisualEffects', 'VisualFXSetting', 'REG_DWORD', 0);
+      await reg('HKCU\\Control Panel\\Desktop', 'MenuShowDelay', 'REG_SZ', 400);
+      await reg('HKCU\\Control Panel\\Mouse', 'MouseSpeed', 'REG_SZ', 1);
+      await reg('HKCU\\Control Panel\\Mouse', 'MouseThreshold1', 'REG_SZ', 6);
+      await reg('HKCU\\Control Panel\\Mouse', 'MouseThreshold2', 'REG_SZ', 10);
+    },
+  },
+  {
     id: 'flush',
     group: 'network',
     label: 'Cache DNS vidé et table ARP nettoyée',
