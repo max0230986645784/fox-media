@@ -94,6 +94,7 @@ function renderState(state) {
   $('opt-autoboost').checked = state.settings.autoBoost;
   $('opt-anticrash').checked = state.settings.antiCrash;
   $('opt-hogs').checked = state.settings.closeHogs;
+  $('opt-killswitch').checked = Boolean(state.settings.killSwitch);
   $('opt-dns').value = state.settings.dns;
   $('opt-hosts').value = state.settings.pingHosts.join(', ');
   $('ping-hosts').textContent = state.settings.pingHosts.join(' · ');
@@ -296,7 +297,7 @@ function renderSpeedProgress(step) {
     const isDown = step.phase === 'down';
     $('speed-status').textContent = isDown ? 'Téléchargement en cours…' : 'Envoi en cours…';
     $(isDown ? 'speed-down' : 'speed-up').textContent = mbps(step.value);
-    $('speed-bar').style.width = `${Math.min(100, (step.value / 1e9) * 100 + 5)}%`;
+    $('speed-bar').style.width = `${Math.round((isDown ? 0 : 50) + (step.progress || 0) * 50)}%`;
   }
 }
 
@@ -410,6 +411,71 @@ async function toggleVpn() {
   renderVpn(next);
 }
 
+// ---- Bouclier Nox ------------------------------------------------------------
+
+let shieldBusy = false;
+
+function renderShield(status) {
+  const preview = status.platform !== 'win32';
+  const ad = $('adblock-badge');
+  ad.textContent = status.adblock.enabled ? `Actif · ${status.adblock.count.toLocaleString('fr-FR')} domaines` : 'Inactif';
+  ad.className = `badge ${status.adblock.enabled ? 'on' : 'muted'}`;
+  $('adblock-btn').textContent = status.adblock.enabled ? 'Désactiver' : 'Activer';
+  $('adblock-btn').classList.toggle('primary', !status.adblock.enabled);
+  $('adblock-btn').classList.toggle('secondary', status.adblock.enabled);
+  if (status.adblock.updatedAt) $('adblock-detail').textContent = `Listes du ${new Date(status.adblock.updatedAt).toLocaleDateString('fr-FR')}`;
+
+  const fw = $('firewall-badge');
+  fw.textContent = status.firewall.enabled ? 'Actif · PC invisible' : preview ? 'Aperçu' : 'Inactif';
+  fw.className = `badge ${status.firewall.enabled ? 'on' : 'muted'}`;
+  $('firewall-btn').textContent = status.firewall.enabled ? 'Désactiver' : 'Activer';
+  $('firewall-btn').classList.toggle('primary', !status.firewall.enabled);
+  $('firewall-btn').classList.toggle('secondary', status.firewall.enabled);
+  const list = $('firewall-steps');
+  if (!list.children.length) {
+    for (const step of status.firewall.steps) {
+      const li = el('li');
+      li.dataset.id = `shield-${step.id}`;
+      li.append(el('span', 'dot'), el('span', '', step.label));
+      list.append(li);
+    }
+  }
+  if (status.firewall.enabled) list.querySelectorAll('li').forEach((li) => li.classList.add('ok'));
+}
+
+async function toggleShield(kind) {
+  if (shieldBusy) return;
+  shieldBusy = true;
+  const status = await api.shieldStatus();
+  const enabled = kind === 'adblock' ? status.adblock.enabled : status.firewall.enabled;
+  const button = $(`${kind}-btn`);
+  const detail = $(`${kind}-detail`);
+  button.disabled = true;
+  detail.textContent = enabled ? 'Désactivation…' : 'Activation…';
+  const result = kind === 'adblock' ? await api.shieldAdblock(!enabled) : await api.shieldFirewall(!enabled);
+  button.disabled = false;
+  shieldBusy = false;
+  if (kind === 'adblock') {
+    detail.textContent = result.ok
+      ? `${result.count.toLocaleString('fr-FR')} domaines bloqués`
+      : result.error || 'Erreur';
+    if (result.skipped && result.count) detail.textContent = `Aperçu : ${result.count.toLocaleString('fr-FR')} domaines téléchargés, hosts modifié uniquement sous Windows`;
+  } else {
+    for (const entry of result.report) {
+      const li = document.querySelector(`li[data-id="shield-${entry.id}"]`);
+      if (!li) continue;
+      li.classList.remove('ok', 'ko', 'skip');
+      li.classList.add(entry.skipped ? 'skip' : entry.ok ? 'ok' : 'ko');
+    }
+    const failed = result.report.filter((entry) => !entry.ok && !entry.skipped);
+    detail.textContent = result.report.every((entry) => entry.skipped)
+      ? 'Aperçu : les règles pare-feu ne s’appliquent que sous Windows'
+      : failed.length ? `${failed.length} étape(s) refusée(s) : lance en administrateur` : enabled ? 'Règles retirées, réglages Windows par défaut' : 'PC protégé et invisible sur le réseau';
+    if (enabled) $('firewall-steps').querySelectorAll('li').forEach((li) => li.classList.remove('ok'));
+  }
+  renderShield(result.status);
+}
+
 // ---- Boutons -----------------------------------------------------------------
 
 $('boost-btn').addEventListener('click', async () => {
@@ -439,6 +505,7 @@ $('save-btn').addEventListener('click', async () => {
     autoBoost: $('opt-autoboost').checked,
     antiCrash: $('opt-anticrash').checked,
     closeHogs: $('opt-hogs').checked,
+    killSwitch: $('opt-killswitch').checked,
     dns: $('opt-dns').value,
     pingHosts: $('opt-hosts').value.split(','),
   });
@@ -451,6 +518,8 @@ $('save-btn').addEventListener('click', async () => {
 });
 
 $('speed-btn').addEventListener('click', runSpeedTest);
+$('adblock-btn').addEventListener('click', () => toggleShield('adblock'));
+$('firewall-btn').addEventListener('click', () => toggleShield('firewall'));
 $('vpn-btn').addEventListener('click', toggleVpn);
 $('vpn-refresh').addEventListener('click', () => loadVpnServers(true));
 $('vpn-mode').addEventListener('change', fillCountries);
@@ -467,12 +536,14 @@ api.onMetrics(renderMetrics);
 api.onScanProgress((step) => { $('scan-status').textContent = step.label; });
 api.onSpeedTestProgress(renderSpeedProgress);
 api.onVpnProgress((step) => { $('vpn-status').textContent = step.label; });
+api.onShieldProgress((step) => { $('shield-status').textContent = step.label; });
 
 (async () => {
   await renderTweaks();
   renderState(await api.getState());
   $('vpn-mode').value = currentState.settings.vpnMode;
   renderQuarantine();
+  api.shieldStatus().then(renderShield);
   drawChart();
   loadVpnServers().then(() => api.vpnStatus()).then(renderVpn);
   setInterval(async () => { if (!vpnBusy) renderVpn(await api.vpnStatus()); }, 30000);

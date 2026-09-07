@@ -157,3 +157,12 @@ button.danger:hover { border-color: var(--bad); }
 button:disabled { opacity: 0.5; cursor: not-allowed; }
 
 .foot { color: var(--muted); font-size: 12px; text-align: center; margin: 0; }
+
+/* Bouclier Nox */
+.shield-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.shield-item { background: rgba(255, 255, 255, 0.03); border: 1px solid #262638; border-radius: 12px; padding: 14px; display: flex; flex-direction: column; gap: 10px; }
+.shield-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.shield-head h3 { margin: 0; font-size: 15px; }
+.shield-item p { margin: 0; font-size: 12px; line-height: 1.45; }
+.shield-item .tweaks li { font-size: 12px; }
+@media (max-width: 900px) { .shield-grid { grid-template-columns: 1fr; } }

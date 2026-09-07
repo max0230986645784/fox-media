@@ -8,7 +8,8 @@ const DOWN_STREAMS = 6;
 const UP_STREAMS = 3;
 const PHASE_MS = 8000;
 const CHUNK = 25_000_000;
-const UP_BODY = crypto.randomBytes(2_000_000);
+const UP_BODY = crypto.randomBytes(500_000);
+const LATENCY_TIMEOUT_MS = 4000;
 
 let running = false;
 
@@ -17,7 +18,7 @@ async function measureLatency(onProgress) {
   for (let index = 0; index < LATENCY_SAMPLES; index += 1) {
     const started = performance.now();
     try {
-      await fetch(`${DOWN_URL}0&r=${Math.random()}`, { cache: 'no-store' });
+      await fetch(`${DOWN_URL}0&r=${Math.random()}`, { cache: 'no-store', signal: AbortSignal.timeout(LATENCY_TIMEOUT_MS) });
       samples.push(performance.now() - started);
     } catch {
       // paquet perdu : ignoré pour la moyenne
@@ -38,7 +39,7 @@ async function measurePhase(phase, streams, transfer, onProgress) {
   const started = performance.now();
   const report = () => {
     const seconds = (performance.now() - started) / 1000;
-    if (seconds > 0.5) onProgress({ phase, value: (bytes * 8) / seconds });
+    if (seconds > 0.5) onProgress({ phase, value: (bytes * 8) / seconds, progress: Math.min(1, (seconds * 1000) / PHASE_MS) });
   };
   const ticker = setInterval(report, 250);
   const pending = new Set();

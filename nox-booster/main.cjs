@@ -4,6 +4,7 @@ const path = require('node:path');
 const booster = require('./booster.cjs');
 const vpn = require('./vpn.cjs');
 const { speedTest } = require('./speedtest.cjs');
+const shield = require('./shield.cjs');
 
 const DEFAULT_SETTINGS = {
   autoStart: true,
@@ -14,7 +15,11 @@ const DEFAULT_SETTINGS = {
   pingHosts: ['1.1.1.1', '8.8.8.8'],
   vpnCountry: 'FR',
   vpnMode: 'vpn',
+  adblock: false,
+  killSwitch: false,
+  language: 'fr',
 };
+const LANGUAGES = ['fr', 'en', 'es', 'it', 'de', 'pt'];
 
 const settingsFile = () => path.join(app.getPath('userData'), 'settings.json');
 
@@ -218,9 +223,13 @@ ipcMain.handle('booster:save-settings', (_event, next) => {
     dns: booster.DNS_PROFILES[next.dns] ? next.dns : 'none',
     pingHosts: hosts.length ? hosts : DEFAULT_SETTINGS.pingHosts,
     vpnCountry: /^[A-Z]{2}$/.test(String(next.vpnCountry)) ? next.vpnCountry : settings.vpnCountry,
-    vpnMode: next.vpnMode === 'proxy' ? 'proxy' : 'vpn',
+    vpnMode: next.vpnMode === undefined ? settings.vpnMode : next.vpnMode === 'proxy' ? 'proxy' : 'vpn',
+    killSwitch: Boolean(next.killSwitch),
+    language: LANGUAGES.includes(next.language) ? next.language : settings.language,
+    adblock: settings.adblock,
   };
   saveSettings(settings);
+  vpn.setKillSwitch(settings.killSwitch);
   applyAutoStart();
   return settings;
 });
@@ -232,18 +241,43 @@ ipcMain.handle('vpn:servers', async (_event, force) => {
 });
 ipcMain.handle('vpn:status', () => vpn.status(ipFetcher));
 ipcMain.handle('vpn:connect', async (_event, options) => {
-  const country = String(options && options.country || settings.vpnCountry).toUpperCase();
   const mode = options && options.mode === 'proxy' ? 'proxy' : 'vpn';
+  let country = String((options && options.country) || settings.vpnCountry).toUpperCase();
+  if (options && options.quick) {
+    await vpn.listServers();
+    country = vpn.bestCountry(mode) || country;
+  }
   settings = { ...settings, vpnCountry: country, vpnMode: mode };
   saveSettings(settings);
   return vpn.connect({ country, mode }, (step) => send('vpn:progress', step), ipFetcher);
 });
 ipcMain.handle('vpn:disconnect', () => vpn.disconnect((step) => send('vpn:progress', step), ipFetcher));
 ipcMain.handle('booster:speedtest', () => speedTest((step) => send('booster:speedtest-progress', step)));
+const shieldProgress = (step) => send('shield:progress', step);
+ipcMain.handle('shield:status', () => shield.status());
+ipcMain.handle('shield:adblock', async (_event, enable) => {
+  const result = enable ? await shield.enableAdblock(shieldProgress) : await shield.disableAdblock();
+  if (result.ok) {
+    settings = { ...settings, adblock: Boolean(enable) };
+    saveSettings(settings);
+  }
+  return { ...result, status: await shield.status() };
+});
+ipcMain.handle('shield:firewall', async (_event, enable) => {
+  const report = enable ? await shield.enableFirewall(shieldProgress) : await shield.disableFirewall(shieldProgress);
+  return { report, status: await shield.status() };
+});
 ipcMain.handle('booster:open-external', (_event, url) => {
   if (/^https:\/\//.test(url)) shell.openExternal(url);
 });
 ipcMain.handle('booster:hide', () => win.hide());
+
+// Les listes de pubs/trackers sont rafraîchies au démarrage si elles datent de plus d'une semaine.
+async function refreshAdblockIfStale() {
+  const { adblock } = await shield.status();
+  if (!adblock.enabled || (adblock.updatedAt && Date.now() - adblock.updatedAt < 7 * 86400000)) return;
+  await shield.enableAdblock(shieldProgress);
+}
 
 const gotLock = app.requestSingleInstanceLock();
 if (!gotLock) {
@@ -255,11 +289,13 @@ if (!gotLock) {
 
   app.whenReady().then(async () => {
     state.admin = await booster.isAdmin();
+    vpn.setKillSwitch(settings.killSwitch);
     createWindow();
     refreshTray = createTray();
     applyAutoStart();
     startMonitoring();
     if (settings.autoBoost && booster.IS_WINDOWS) boost();
+    if (settings.adblock && booster.IS_WINDOWS) refreshAdblockIfStale();
   });
 
   app.on('before-quit', () => {

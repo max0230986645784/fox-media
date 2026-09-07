@@ -65,7 +65,7 @@ async function vpnGateServers() {
     const cols = line.split(',');
     if (cols.length < 15) continue;
     const [host, ip, score, ping, speed, , countryCode, sessions, uptime] = cols;
-    if (!/^\d+\.\d+\.\d+\.\d+$/.test(ip) || !/^[A-Z]{2}$/.test(countryCode)) continue;
+    if (!/^\d+\.\d+\.\d+\.\d+$/.test(ip) || !/^[A-Z]{2}$/.test(countryCode) || !/^[a-z0-9-]{1,63}$/i.test(host)) continue;
     servers.push({
       id: `vpn:${ip}`,
       mode: 'vpn',
@@ -88,6 +88,8 @@ async function proxyServers() {
   for (const proxy of data.proxies || []) {
     const country = proxy.ip_data && proxy.ip_data.countryCode;
     if (!proxy.alive || !country || !/^[A-Z]{2}$/.test(country)) continue;
+    if (!/^\d+\.\d+\.\d+\.\d+$/.test(proxy.ip) || !(Number(proxy.port) > 0 && Number(proxy.port) < 65536)) continue;
+    if (proxy.protocol !== 'http' && proxy.protocol !== 'socks5') continue;
     servers.push({
       id: `proxy:${proxy.protocol}:${proxy.ip}:${proxy.port}`,
       mode: 'proxy',
@@ -212,7 +214,33 @@ async function fastestProxy(country, onProgress) {
 
 // ---- État / connexion ----------------------------------------------------------
 
-const state = { connected: false, mode: null, server: null, country: null, connecting: false, error: null, since: null };
+const state = { connected: false, mode: null, server: null, country: null, connecting: false, error: null, since: null, killSwitch: false, killSwitchActive: false, homeIp: null };
+
+// Kill switch : si le tunnel VPN tombe, tout le trafic sortant est coupé jusqu'à reconnexion/déconnexion
+// manuelle, pour que ta vraie IP ne fuite jamais.
+async function engageKillSwitch() {
+  if (!IS_WINDOWS || state.killSwitchActive) return;
+  state.killSwitchActive = true;
+  await cmd('netsh.exe', ['advfirewall', 'set', 'allprofiles', 'firewallpolicy', 'blockinbound,blockoutbound']);
+}
+
+async function releaseKillSwitch() {
+  if (!state.killSwitchActive) return;
+  state.killSwitchActive = false;
+  if (IS_WINDOWS) await cmd('netsh.exe', ['advfirewall', 'set', 'allprofiles', 'firewallpolicy', 'blockinbound,allowoutbound']);
+}
+
+function setKillSwitch(enabled) {
+  state.killSwitch = Boolean(enabled);
+  if (!state.killSwitch) return releaseKillSwitch();
+  return Promise.resolve();
+}
+
+/** Pays avec le meilleur serveur pour ce mode (connexion rapide). */
+function bestCountry(mode) {
+  const best = cache.servers.filter((server) => server.mode === mode).sort((a, b) => b.score - a.score)[0];
+  return best ? best.country : null;
+}
 
 async function publicIp(fetcher = fetch) {
   try {
@@ -239,11 +267,36 @@ async function status(fetcher) {
   if (state.mode === 'vpn' && !connected && state.connected) {
     state.connected = false;
     state.error = 'Connexion VPN perdue';
+    if (state.killSwitch) await engageKillSwitch();
   }
-  return { ...state, connected, ip: await publicIp(fetcher), platform: process.platform };
+  const ip = state.killSwitchActive ? null : await publicIp(fetcher);
+  if (!state.connected && !state.connecting && ip) state.homeIp = ip;
+  return { ...state, connected, ip, platform: process.platform };
+}
+
+// Réglages proxy de l'utilisateur avant la session, remis tels quels à la déconnexion.
+let savedProxy = null;
+
+async function readProxyValue(name) {
+  const result = await cmd('reg.exe', ['query', PROXY_KEY, '/v', name]);
+  if (!result.ok) return null;
+  const match = result.out.match(new RegExp(`${name}\\s+REG_\\w+\\s+(.*)$`, 'm'));
+  return match ? match[1].trim() : null;
+}
+
+async function writeProxyValue(name, type, value) {
+  if (value === null) await cmd('reg.exe', ['delete', PROXY_KEY, '/v', name, '/f']);
+  else await cmd('reg.exe', ['add', PROXY_KEY, '/v', name, '/t', type, '/d', value, '/f']);
 }
 
 async function setSystemProxy(server) {
+  if (!savedProxy) {
+    savedProxy = {
+      ProxyEnable: await readProxyValue('ProxyEnable'),
+      ProxyServer: await readProxyValue('ProxyServer'),
+      ProxyOverride: await readProxyValue('ProxyOverride'),
+    };
+  }
   const value = server.protocol === 'socks5' ? `socks=${server.ip}:${server.port}` : `${server.ip}:${server.port}`;
   await cmd('reg.exe', ['add', PROXY_KEY, '/v', 'ProxyServer', '/t', 'REG_SZ', '/d', value, '/f']);
   await cmd('reg.exe', ['add', PROXY_KEY, '/v', 'ProxyOverride', '/t', 'REG_SZ', '/d', '<local>;192.168.*;10.*', '/f']);
@@ -251,9 +304,12 @@ async function setSystemProxy(server) {
   await refreshWinInet();
 }
 
-async function clearSystemProxy() {
-  await cmd('reg.exe', ['add', PROXY_KEY, '/v', 'ProxyEnable', '/t', 'REG_DWORD', '/d', '0', '/f']);
-  await cmd('reg.exe', ['delete', PROXY_KEY, '/v', 'ProxyServer', '/f']);
+async function restoreSystemProxy() {
+  if (!savedProxy) return;
+  await writeProxyValue('ProxyEnable', 'REG_DWORD', savedProxy.ProxyEnable === null ? '0' : String(parseInt(savedProxy.ProxyEnable, 16) || 0));
+  await writeProxyValue('ProxyServer', 'REG_SZ', savedProxy.ProxyServer);
+  await writeProxyValue('ProxyOverride', 'REG_SZ', savedProxy.ProxyOverride);
+  savedProxy = null;
   await refreshWinInet();
 }
 
@@ -288,43 +344,56 @@ async function connect({ country, mode = 'vpn' }, onProgress = () => {}, fetcher
   state.connecting = true;
   state.error = null;
   try {
-    await listServers();
-    if (!IS_WINDOWS) {
-      const server = candidates(country, mode)[0] || null;
-      state.error = server ? 'Aperçu : la connexion réelle nécessite Windows' : `Aucun serveur ${mode} disponible pour ${countryName(country)}`;
-      return status(fetcher);
-    }
-    if (state.connected) await disconnect(onProgress);
-    if (mode === 'proxy') {
-      const best = await fastestProxy(country, onProgress);
-      if (!best) {
-        state.error = `Aucun proxy ${countryName(country)} ne répond pour l'instant, réessaie ou change de pays`;
-        return status(fetcher);
-      }
-      onProgress({ label: `Application du proxy ${best.server.ip}:${best.server.port} (${best.probe.ms} ms)…` });
-      await setSystemProxy(best.server);
-      Object.assign(state, { connected: true, mode, server: best.server, country, since: Date.now() });
-      return status(fetcher);
-    }
-    // L2TP derrière une box (NAT) : Windows exige cette clé, active après redémarrage ; SSTP sert de secours immédiat.
-    await cmd('reg.exe', ['add', 'HKLM\\SYSTEM\\CurrentControlSet\\Services\\PolicyAgent', '/v', 'AssumeUDPEncapsulationContextOnSendRule', '/t', 'REG_DWORD', '/d', '2', '/f']);
-    const errors = [];
-    for (const server of candidates(country, 'vpn').slice(0, 4)) {
-      for (const tunnel of ['Sstp', 'L2tp']) {
-        const result = await windowsVpnConnect(server, tunnel, onProgress);
-        if (result.ok) {
-          Object.assign(state, { connected: true, mode, server, country, since: Date.now() });
-          onProgress({ label: 'Connecté, vérification de ta nouvelle IP…' });
-          return status(fetcher);
-        }
-        errors.push(`${server.ip} ${tunnel} : ${result.error}`);
-      }
-    }
-    state.error = errors.length ? `Aucun serveur ${countryName(country)} n'a accepté la connexion (${errors[0]})` : `Aucun serveur VPN disponible pour ${countryName(country)}`;
-    return status(fetcher);
+    await connectInner(country, mode, onProgress);
+  } catch (error) {
+    state.error = `Connexion impossible : ${error.message}`;
   } finally {
     state.connecting = false;
   }
+  return status(fetcher);
+}
+
+async function connectInner(country, mode, onProgress) {
+  await releaseKillSwitch();
+  await listServers();
+  if (!IS_WINDOWS) {
+    const server = candidates(country, mode)[0] || null;
+    state.error = server ? 'Aperçu : la connexion réelle nécessite Windows' : `Aucun serveur ${mode} disponible pour ${countryName(country)}`;
+    return;
+  }
+  if (state.connected) await disconnect(onProgress);
+  if (mode === 'proxy') {
+    const best = await fastestProxy(country, onProgress);
+    if (!best) {
+      state.error = `Aucun proxy ${countryName(country)} ne répond pour l'instant, réessaie ou change de pays`;
+      return;
+    }
+    onProgress({ label: `Application du proxy ${best.server.ip}:${best.server.port} (${best.probe.ms} ms)…` });
+    try {
+      await setSystemProxy(best.server);
+    } catch (error) {
+      await restoreSystemProxy();
+      state.error = `Proxy non appliqué : ${error.message}`;
+      return;
+    }
+    Object.assign(state, { connected: true, mode, server: best.server, country, since: Date.now() });
+    return;
+  }
+  // L2TP derrière une box (NAT) : Windows exige cette clé, active après redémarrage ; SSTP sert de secours immédiat.
+  await cmd('reg.exe', ['add', 'HKLM\\SYSTEM\\CurrentControlSet\\Services\\PolicyAgent', '/v', 'AssumeUDPEncapsulationContextOnSendRule', '/t', 'REG_DWORD', '/d', '2', '/f']);
+  const errors = [];
+  for (const server of candidates(country, 'vpn').slice(0, 4)) {
+    for (const tunnel of ['Sstp', 'L2tp']) {
+      const result = await windowsVpnConnect(server, tunnel, onProgress);
+      if (result.ok) {
+        Object.assign(state, { connected: true, mode, server, country, since: Date.now() });
+        onProgress({ label: 'Connecté, vérification de ta nouvelle IP…' });
+        return;
+      }
+      errors.push(`${server.ip} ${tunnel} : ${result.error}`);
+    }
+  }
+  state.error = errors.length ? `Aucun serveur ${countryName(country)} n'a accepté la connexion (${errors[0]})` : `Aucun serveur VPN disponible pour ${countryName(country)}`;
 }
 
 async function disconnect(onProgress = () => {}, fetcher) {
@@ -332,12 +401,13 @@ async function disconnect(onProgress = () => {}, fetcher) {
   if (IS_WINDOWS) {
     await cmd('rasdial.exe', [CONNECTION_NAME, '/disconnect'], 15000);
     await powershell(`Remove-VpnConnection -Name '${CONNECTION_NAME}' -Force -ErrorAction SilentlyContinue`, 20000);
-    await clearSystemProxy();
+    await restoreSystemProxy();
   }
+  await releaseKillSwitch();
   Object.assign(state, { connected: false, mode: null, server: null, country: null, since: null, error: null });
   return status(fetcher);
 }
 
-const hasSession = () => state.connected;
+const hasSession = () => state.connected || savedProxy !== null || state.killSwitchActive;
 
-module.exports = { listServers, connect, disconnect, status, hasSession, countryName, CONNECTION_NAME };
+module.exports = { listServers, connect, disconnect, status, hasSession, countryName, setKillSwitch, bestCountry, CONNECTION_NAME };

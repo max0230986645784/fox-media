@@ -108,6 +108,38 @@
         </div>
       </section>
 
+      <section class="card" id="shield-card">
+        <div class="card-head">
+          <h2>Bouclier Nox</h2>
+          <span id="shield-status" class="muted">pubs, trackers, anti-DDoS, PC invisible</span>
+        </div>
+        <div class="shield-grid">
+          <div class="shield-item">
+            <div class="shield-head">
+              <h3>Bloqueur de pubs &amp; trackers</h3>
+              <span id="adblock-badge" class="badge muted">Inactif</span>
+            </div>
+            <p class="muted">Bloque les pubs et les traqueurs pour tout le PC (navigateurs, jeux, apps) via le fichier hosts Windows. Listes StevenBlack + Hagezi + Peter Lowe, mises à jour chaque semaine. Jeux, lanceurs, Discord et Windows Update ne sont jamais bloqués.</p>
+            <div class="actions">
+              <button id="adblock-btn" class="primary">Activer</button>
+              <span id="adblock-detail" class="muted"></span>
+            </div>
+          </div>
+          <div class="shield-item">
+            <div class="shield-head">
+              <h3>Anti-DDoS &amp; PC invisible</h3>
+              <span id="firewall-badge" class="badge muted">Inactif</span>
+            </div>
+            <ul id="firewall-steps" class="tweaks"></ul>
+            <div class="actions">
+              <button id="firewall-btn" class="primary">Activer</button>
+              <span id="firewall-detail" class="muted"></span>
+            </div>
+          </div>
+        </div>
+        <p class="muted vpn-note">Le bouclier rend ton PC invisible aux scans et coupe les portes d'entrée (ping, partage, bureau à distance). Contre une vraie attaque DDoS sur ta box, connecte le Nox VPN : l'attaque vise alors le serveur VPN, pas ton IP.</p>
+      </section>
+
       <section class="grid">
         <div class="card">
           <div class="card-head"><h2>Réseau &amp; ping</h2></div>
@@ -171,6 +203,10 @@
           <label class="toggle">
             <input type="checkbox" id="opt-hogs" />
             <span>Fermer les programmes inutiles (OneDrive, Widgets, Game Bar…) quand un jeu tourne</span>
+          </label>
+          <label class="toggle">
+            <input type="checkbox" id="opt-killswitch" />
+            <span>Kill switch Nox VPN : si le VPN tombe, couper Internet pour ne jamais montrer ta vraie IP</span>
           </label>
           <label class="field">
             <span>DNS rapides</span>
