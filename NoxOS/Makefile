@@ -22,7 +22,8 @@ QEMU      := qemu-system-i386
 CFLAGS    := -m32 -std=gnu11 -ffreestanding -fno-pie -fno-stack-protector \
              -fno-builtin -nostdlib -nostdinc -O2 -Wall -Wextra -Werror \
              -mno-sse -mno-mmx -mno-80387 -mgeneral-regs-only \
-             -I$(KERNEL_DIR)/include
+             -D__KERNEL__ -I$(KERNEL_DIR)/include
+HOSTCC    := gcc
 LDFLAGS   := -m elf_i386 -T $(KERNEL_DIR)/linker.ld -nostdlib
 ASFLAGS32 := -f elf32
 
@@ -40,6 +41,7 @@ KERNEL_C   := $(wildcard $(KERNEL_DIR)/core/*.c) \
               $(wildcard $(KERNEL_DIR)/drivers/*.c) \
               $(wildcard $(KERNEL_DIR)/mm/*.c) \
               $(wildcard $(KERNEL_DIR)/proc/*.c) \
+              $(wildcard $(KERNEL_DIR)/fs/*.c) \
               $(wildcard $(KERNEL_DIR)/lib/*.c)
 
 KERNEL_OBJ := $(patsubst %.asm,$(BUILD)/%.o,$(KERNEL_ASM)) \
@@ -50,6 +52,12 @@ KERNEL_ELF := $(BUILD)/kernel.elf
 KERNEL_BIN := $(BUILD)/kernel.bin
 STAGE1_BIN := $(BUILD)/stage1.bin
 STAGE2_BIN := $(BUILD)/stage2.bin
+MKNOXFS    := $(BUILD)/mknoxfs
+ROOTFS_SRC := rootfs
+ROOTFS     := $(BUILD)/rootfs
+FS_IMAGE   := $(BUILD)/noxfs.img
+FS_BLOCKS  := 1024                     # 4 Mo
+BOOT_AREA  := 1048576                  # 1 Mo reserve avant NoxFS (LBA 2048)
 
 .PHONY: all run run-serial test clean size
 
@@ -81,10 +89,21 @@ $(STAGE2_BIN): $(BOOT_DIR)/stage2.asm $(KERNEL_BIN)
 	      -DKERNEL_SECTORS=$$(( ($$(stat -c %s $(KERNEL_BIN)) + 511) / 512 )) \
 	      $< -o $@
 
-# --- Image disque : [stage1][stage2][kernel] puis remplissage a 1.44 Mo -------
-$(IMAGE): $(STAGE1_BIN) $(STAGE2_BIN) $(KERNEL_BIN)
+# --- NoxFS : outil hote + image construite depuis rootfs/ --------------------
+$(MKNOXFS): tools/mknoxfs.c $(KERNEL_DIR)/include/nox/noxfs.h
+	@mkdir -p $(BUILD)
+	$(HOSTCC) -O2 -Wall -Wextra -Werror -o $@ $<
+
+$(FS_IMAGE): $(MKNOXFS) $(shell find $(ROOTFS_SRC) -type f)
+	rm -rf $(ROOTFS) && mkdir -p $(ROOTFS)
+	cp -r $(ROOTFS_SRC)/. $(ROOTFS)/
+	$(MKNOXFS) $@ $(FS_BLOCKS) $(ROOTFS) NoxOS
+
+# --- Image disque : [stage1][stage2][kernel] ... 1 Mo ... [NoxFS] -------------
+$(IMAGE): $(STAGE1_BIN) $(STAGE2_BIN) $(KERNEL_BIN) $(FS_IMAGE)
 	cat $(STAGE1_BIN) $(STAGE2_BIN) $(KERNEL_BIN) > $@
-	truncate -s 1474560 $@
+	truncate -s $(BOOT_AREA) $@
+	cat $(FS_IMAGE) >> $@
 	@echo "==> $(IMAGE) ready ($$(stat -c %s $(KERNEL_BIN)) bytes of kernel)"
 
 size: $(KERNEL_ELF)

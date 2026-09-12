@@ -22,6 +22,8 @@
 #include <nox/paging.h>
 #include <nox/thread.h>
 #include <nox/timer.h>
+#include <nox/ata.h>
+#include <nox/fs.h>
 #include <nox/keyboard.h>
 #include <nox/cpu.h>
 #include <nox/shell.h>
@@ -84,6 +86,18 @@ void kmain(u32 magic, const struct boot_info *info)
 
     step("keyboard");
     keyboard_init();
+
+    step("disk");
+    if (ata_init()) {
+        kprintf("       ata0: %s, %u MB\n", ata_model(), ata_sector_count() / 2048);
+        if (fs_init())
+            kprintf("       noxfs: '%s' mounted, %u/%u blocks used\n",
+                    fs_super()->label, fs_used_blocks(), fs_super()->total_blocks);
+        else
+            kprintf("       noxfs: no valid volume at LBA %u\n", NOXFS_DISK_LBA);
+    } else {
+        kprintf("       no ATA disk\n");
+    }
 
     step("scheduler");
     sched_init();
