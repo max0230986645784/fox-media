@@ -111,6 +111,11 @@ detect_memory:
     cmp dword [es:di + 12], 0   ; et longueur haute = 0 -> on ignore
     je .skip
 .keep:
+    cmp ecx, 20                 ; reponse ACPI 3.0 (24 octets) ?
+    jbe .count
+    test dword [es:di + 20], 1  ; bit 0 = entree valide, sinon on l'ignore
+    jz .skip
+.count:
     inc bp
     add di, 24
     cmp bp, 32                  ; maximum 32 entrees dans notre buffer

@@ -17,6 +17,7 @@ extern _bss_end
 
 _start:
     cli
+    cld
     mov esp, kernel_stack_top
     xor ebp, ebp
 

@@ -20,5 +20,6 @@ typedef void (*irq_handler_t)(struct registers *regs);
 
 void idt_init(void);
 void irq_register_handler(u8 irq, irq_handler_t handler);
+void isr_register_exception_handler(u8 vector, irq_handler_t handler);
 
 #endif

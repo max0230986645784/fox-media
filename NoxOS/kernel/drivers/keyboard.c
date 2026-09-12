@@ -18,9 +18,11 @@ static char buffer[BUF_SIZE];
 static volatile u32 head;
 static volatile u32 tail;
 
-static bool shift_down;
+static bool lshift_down;
+static bool rshift_down;
 static bool ctrl_down;
 static bool caps_lock;
+static bool extended;           /* prefixe 0xE0 recu : le prochain scancode est etendu */
 
 static const char keymap_lower[128] = {
     0,   27,  '1', '2', '3', '4', '5', '6', '7', '8', '9', '0', '-', '=', '\b', '\t',
@@ -59,16 +61,26 @@ static void keyboard_irq(struct registers *regs)
     (void)regs;
     u8 sc = inb(KBD_DATA);
 
-    if (sc == 0xE0)
-        return;             /* prefixe des touches etendues : ignore en v0.1 */
+    if (sc == 0xE0) {
+        extended = true;
+        return;
+    }
+    if (extended) {
+        extended = false;   /* fleches, Ctrl droit, etc. : pas de caractere en v0.2 */
+        if ((sc & 0x7F) == SC_CTRL)
+            ctrl_down = !(sc & 0x80);
+        return;
+    }
 
     bool released = (sc & 0x80) != 0;
     sc &= 0x7F;
 
     switch (sc) {
     case SC_LSHIFT:
+        lshift_down = !released;
+        return;
     case SC_RSHIFT:
-        shift_down = !released;
+        rshift_down = !released;
         return;
     case SC_CTRL:
         ctrl_down = !released;
@@ -84,13 +96,14 @@ static void keyboard_irq(struct registers *regs)
     if (released)
         return;
 
+    bool shift_down = lshift_down || rshift_down;
     char c = shift_down ? keymap_upper[sc] : keymap_lower[sc];
     if (!c)
         return;
 
     if (caps_lock && c >= 'a' && c <= 'z')
         c = (char)(c - 'a' + 'A');
-    else if (caps_lock && c >= 'A' && c <= 'Z' && !shift_down)
+    else if (caps_lock && c >= 'A' && c <= 'Z')
         c = (char)(c - 'A' + 'a');
 
     if (ctrl_down && ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')))

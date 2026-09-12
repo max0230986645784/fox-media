@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
 # =============================================================================
-#  NoxOS - tests automatiques v0.1
+#  NoxOS - tests automatiques
 # -----------------------------------------------------------------------------
 #  Demarre l'image dans QEMU sans fenetre et verifie :
 #    - que le kernel boote et affiche "System initialized successfully."
 #    - que le clavier PS/2 fonctionne (touches envoyees via le moniteur QEMU)
 #    - que le shell repond a des commandes envoyees par le port serie
+#    - v0.2 : PMM, pagination, tas (heaptest), threads preemptifs (spawn/ps)
 #  Toute la sortie du kernel (VGA = serie) est enregistree dans
 #  build/test-serial.log puis analysee.
 #
@@ -45,6 +46,10 @@ serial_send() {
     serial_send "help"
     serial_send "echo serial ok"
     serial_send "memory"
+    serial_send "heaptest"
+    serial_send "spawn 3"
+    sleep 3                                     # les threads demo tournent
+    serial_send "ps"
     exec 3>&-
     echo "quit"
 ) | timeout 40 "$QEMU" \
@@ -63,15 +68,23 @@ check() {
     fi
 }
 
-echo "NoxOS v0.1 boot tests"
+echo "NoxOS v0.2 boot tests"
 check "NOXOS KERNEL v"                     "kernel banner printed"
 check "System initialized successfully."   "kernel init completed"
 check "E820 entries:"                      "memory map received from bootloader"
 check "nox> version"                       "PS/2 keyboard input reaches the shell"
-check "NoxOS 0.1.0 - Built from scratch."  "'version' command works"
+check "NoxOS 0.2.0 - Built from scratch."  "'version' command works"
 check "list available commands"            "'help' via serial works"
 check "serial ok"                          "'echo' via serial works"
 check "Total usable :"                     "'memory' command works"
+check "[init] paging"                      "paging enabled at boot"
+check "Frames (4 KB):"                     "physical frame allocator reports stats"
+check "heap test ok"                       "kmalloc/kfree/aligned + integrity check"
+check "spawned thread 5 'demo-02'"         "3 kernel threads created"
+check "[demo-00] step 1/3"                 "thread demo-00 ran (preempted shell)"
+check "[demo-02] finished"                 "threads sleep/wake and exit"
+check "2 threads:"                         "finished threads were reaped (ps)"
+check "main"                               "'ps' lists the main thread"
 
 if grep -q "KERNEL PANIC" "$LOG" 2>/dev/null; then
     echo "  [FAIL] kernel panic detected"

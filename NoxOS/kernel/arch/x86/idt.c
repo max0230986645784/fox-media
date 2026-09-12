@@ -28,6 +28,7 @@ struct idt_ptr {
 static struct idt_entry idt[IDT_ENTRIES];
 static struct idt_ptr   idt_pointer;
 static irq_handler_t    irq_handlers[16];
+static irq_handler_t    exception_handlers[32];
 
 static const char *exception_names[32] = {
     "Division by zero", "Debug", "Non-maskable interrupt", "Breakpoint",
@@ -69,6 +70,7 @@ void idt_init(void)
 {
     memset(idt, 0, sizeof(idt));
     memset(irq_handlers, 0, sizeof(irq_handlers));
+    memset(exception_handlers, 0, sizeof(exception_handlers));
 
     void (*isrs[32])(void) = {
         isr0,  isr1,  isr2,  isr3,  isr4,  isr5,  isr6,  isr7,
@@ -97,10 +99,24 @@ void irq_register_handler(u8 irq, irq_handler_t handler)
         irq_handlers[irq] = handler;
 }
 
-/* Appele par isr_common (isr.asm) pour toute interruption. */
+void isr_register_exception_handler(u8 vector, irq_handler_t handler)
+{
+    if (vector < 32)
+        exception_handlers[vector] = handler;
+}
+
+/* Appele par isr_common (isr.asm) pour toute interruption.
+ * L'EOI est envoye AVANT le handler : ainsi un handler peut changer de
+ * thread (ordonnanceur) sans laisser le PIC bloque en attendant l'EOI. Les
+ * interruptions restent coupees (IF=0) jusqu'a l'iret, donc pas de
+ * reentrance. */
 void isr_dispatch(struct registers *regs)
 {
     if (regs->int_no < 32) {
+        if (exception_handlers[regs->int_no]) {
+            exception_handlers[regs->int_no](regs);
+            return;
+        }
         panic("%s (int %u, err=0x%x) at eip=0x%x",
               exception_names[regs->int_no], regs->int_no,
               regs->err_code, regs->eip);
@@ -108,8 +124,8 @@ void isr_dispatch(struct registers *regs)
 
     if (regs->int_no >= IRQ_BASE && regs->int_no < IRQ_BASE + 16) {
         u8 irq = (u8)(regs->int_no - IRQ_BASE);
+        pic_send_eoi(irq);
         if (irq_handlers[irq])
             irq_handlers[irq](regs);
-        pic_send_eoi(irq);
     }
 }

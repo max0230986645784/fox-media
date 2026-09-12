@@ -23,6 +23,7 @@ STAGE2_LOAD_ADDR equ 0x7E00
 
 start:
     cli
+    cld                         ; le BIOS ne garantit pas DF=0 (lodsb/stosb)
     xor ax, ax
     mov ds, ax
     mov es, ax
@@ -50,9 +51,7 @@ start:
     mov dl, [boot_drive]
     mov bx, STAGE2_LOAD_ADDR    ; ES:BX = 0x0000:0x7E00
     int 0x13
-    jc disk_error
-    cmp al, STAGE2_SECTORS
-    jne disk_error
+    jc disk_error               ; seul CF est fiable (AL n'est pas normalise)
 
     ; --- Saut vers le stage 2 ---------------------------------------------
     mov dl, [boot_drive]        ; on transmet le disque de boot au stage 2

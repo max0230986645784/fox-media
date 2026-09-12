@@ -1,10 +1,11 @@
 /* NoxOS - PIT (Programmable Interval Timer)
  *
  * Le PIT oscille a 1 193 182 Hz. On programme le canal 0 pour qu'il leve
- * l'IRQ 0 a TIMER_HZ ; le compteur de ticks servira plus tard a
- * l'ordonnanceur (multitache, v0.2). Pour l'instant : uptime.
+ * l'IRQ 0 a TIMER_HZ. Chaque tick incremente l'uptime et donne la main a
+ * l'ordonnanceur (sched_tick), qui peut preempter le thread courant.
  */
 #include <nox/timer.h>
+#include <nox/thread.h>
 #include <nox/idt.h>
 #include <nox/pic.h>
 #include <nox/io.h>
@@ -19,6 +20,7 @@ static void timer_irq(struct registers *regs)
 {
     (void)regs;
     ticks++;
+    sched_tick();
 }
 
 void timer_init(void)

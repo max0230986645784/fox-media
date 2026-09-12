@@ -33,11 +33,13 @@ STAGE2_SECTORS := 4
 KERNEL_ASM := $(KERNEL_DIR)/arch/$(ARCH)/entry.asm \
               $(KERNEL_DIR)/arch/$(ARCH)/gdt_flush.asm \
               $(KERNEL_DIR)/arch/$(ARCH)/idt_flush.asm \
-              $(KERNEL_DIR)/arch/$(ARCH)/isr.asm
+              $(KERNEL_DIR)/arch/$(ARCH)/isr.asm \
+              $(KERNEL_DIR)/arch/$(ARCH)/switch.asm
 KERNEL_C   := $(wildcard $(KERNEL_DIR)/core/*.c) \
               $(wildcard $(KERNEL_DIR)/arch/$(ARCH)/*.c) \
               $(wildcard $(KERNEL_DIR)/drivers/*.c) \
               $(wildcard $(KERNEL_DIR)/mm/*.c) \
+              $(wildcard $(KERNEL_DIR)/proc/*.c) \
               $(wildcard $(KERNEL_DIR)/lib/*.c)
 
 KERNEL_OBJ := $(patsubst %.asm,$(BUILD)/%.o,$(KERNEL_ASM)) \

@@ -1,4 +1,4 @@
-/* NoxOS - memoire physique et allocateur kernel de base */
+/* NoxOS - carte memoire E820 et tas kernel */
 #ifndef NOX_MEMORY_H
 #define NOX_MEMORY_H
 
@@ -23,15 +23,19 @@ struct boot_info {
 
 #define E820_USABLE 1
 
+/* Carte memoire (kernel/mm/memory.c) */
 void memory_init(const struct boot_info *info);
 void memory_print_map(void);
-
 u32  memory_total_usable_kb(void);
-u32  memory_heap_used(void);
-u32  memory_heap_size(void);
 
-/* Allocation kernel simple (bump allocator, pas de free en v0.1). */
-void *kmalloc(size_t size);
-void *kmalloc_aligned(size_t size, size_t align);
+/* Tas kernel (kernel/mm/heap.c) : liste chainee de blocs libres dans la zone
+ * virtuelle KHEAP_START..KHEAP_END, agrandie page par page a la demande. */
+void   heap_init(void);
+void  *kmalloc(size_t size);
+void  *kmalloc_aligned(size_t size, size_t align);
+void   kfree(void *ptr);
+u32    heap_used_bytes(void);
+u32    heap_mapped_bytes(void);
+bool   heap_check(void);       /* verifie l'integrite de la liste des blocs */
 
 #endif

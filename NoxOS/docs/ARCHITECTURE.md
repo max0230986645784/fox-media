@@ -1,4 +1,4 @@
-# NoxOS v0.1 — Architecture et fonctionnement
+# NoxOS v0.2 — Architecture et fonctionnement
 
 Ce document explique **ce qui se passe réellement** entre l'allumage de la
 machine et l'apparition du prompt `nox>`. Rien n'est simulé : chaque étape
@@ -85,10 +85,14 @@ Ordre d'initialisation, chaque étape dépendant de la précédente :
 | serial, vga | `drivers/serial.c`, `drivers/vga.c` | pouvoir afficher (et paniquer proprement) |
 | gdt         | `arch/x86/gdt.c`            | GDT du kernel, indépendante du bootloader ; segments ring 3 déjà prévus |
 | pic, idt    | `arch/x86/pic.c`, `idt.c`, `isr.asm` | remappe les IRQ sur 32..47, installe 48 handlers |
-| memory      | `mm/memory.c`               | lit E820, calcule la RAM utilisable, initialise le tas kernel |
-| timer       | `drivers/timer.c`           | PIT à 100 Hz sur IRQ 0 (uptime, futur ordonnanceur) |
+| memory      | `mm/memory.c`               | copie la carte E820, calcule la RAM utilisable |
+| pmm         | `mm/pmm.c`                  | allocateur de frames physiques (bitmap 4 Ko) |
+| paging      | `mm/paging.c`               | répertoire + tables de pages, CR3, CR0.PG, handler de page fault |
+| heap        | `mm/heap.c`                 | tas kernel virtuel `kmalloc`/`kfree` |
+| timer       | `drivers/timer.c`           | PIT à 100 Hz sur IRQ 0 → uptime + `sched_tick()` |
 | keyboard    | `drivers/keyboard.c`        | clavier PS/2 sur IRQ 1, tampon circulaire |
-| `sti`       |                             | interruptions autorisées |
+| scheduler   | `proc/thread.c`, `arch/x86/switch.asm` | `kmain` devient le thread `main`, thread `idle` créé |
+| `sti`       |                             | interruptions autorisées → préemption active |
 | shell       | `core/shell.c`              | boucle `nox>` |
 
 ### Interruptions
@@ -96,16 +100,62 @@ Ordre d'initialisation, chaque étape dépendant de la précédente :
 - `isr.asm` génère 32 stubs d'exceptions + 16 stubs d'IRQ. Chaque stub
   empile le numéro d'interruption (et un code d'erreur factice si le CPU n'en
   fournit pas), sauvegarde les registres et appelle `isr_dispatch()`.
-- Exceptions (0..31) → `panic()` avec le nom de l'exception et `EIP`.
-- IRQ (32..47) → handler enregistré par un pilote via
-  `irq_register_handler()`, puis EOI envoyé au PIC.
+- Exceptions (0..31) → handler enregistré via `isr_register_exception_handler()`
+  (le page fault, vecteur 14, l'utilise), sinon `panic()` avec le nom de
+  l'exception et `EIP`.
+- IRQ (32..47) → EOI envoyé au PIC, puis handler enregistré par un pilote via
+  `irq_register_handler()`. L'EOI est envoyé *avant* le handler car celui du
+  timer peut changer de thread et ne « revenir » que bien plus tard.
 
-### Mémoire (v0.1)
+### Mémoire (v0.2)
 
-- La carte E820 est copiée et affichée par la commande `memory`.
-- `kmalloc()` est un **bump allocator** : un pointeur avance dans la zone
-  libre entre la fin du kernel (`_kernel_end`) et `0x80000`. Pas de `free`.
-  C'est volontairement simple ; la v0.2 introduira la gestion par pages.
+Trois couches, de la plus physique à la plus pratique :
+
+1. **PMM — `mm/pmm.c`** : un bitmap de 1 bit par frame de 4 Ko (128 Ko pour
+   couvrir 4 Go). Au démarrage tout est réservé, puis les zones E820
+   `usable` sont libérées, et tout ce qui est sous 1 Mo est re-réservé
+   (kernel, boot_info, VGA, BIOS). `pmm_alloc_frame()` renvoie une adresse
+   physique de page mise à zéro ; `pmm_free_frame()` détecte les doubles
+   libérations.
+2. **Pagination — `mm/paging.c`** : pagination x86 classique à deux niveaux
+   (répertoire de 1024 entrées → tables de 1024 pages). Toute la RAM est
+   d'abord **identity-mappée** (virtuel = physique) pour que le kernel,
+   chargé à `0x10000`, continue de fonctionner tel quel. Puis `CR3` est
+   chargé et `CR0.PG` activé. Un accès à une page non mappée déclenche un
+   page fault dont le handler affiche l'adresse (`CR2`), le type d'accès et
+   `EIP` avant de paniquer.
+3. **Tas — `mm/heap.c`** : le tas vit dans la zone **virtuelle**
+   `0xD0000000..0xE0000000`, sans rapport avec la RAM physique. Quand il
+   manque de place, `grow()` demande des frames au PMM et les mappe à la fin
+   du tas : c'est le premier vrai usage de la pagination. Les blocs forment
+   une liste doublement chaînée avec en-tête (magic, taille, libre) ;
+   `kmalloc` = first-fit + découpe, `kfree` = fusion avec les voisins libres.
+   `kmalloc_aligned()` sert aux futures structures alignées sur une page.
+   `heap_check()` vérifie l'intégrité de la liste (commande `heaptest`).
+
+### Threads et ordonnanceur (v0.2)
+
+- `struct thread` (`include/nox/thread.h`) : `esp` sauvegardé, id, état
+  (`READY / RUNNING / SLEEPING / ZOMBIE`), nom, pile de 16 Ko allouée par
+  `kmalloc`. Tous les threads sont en **ring 0** et partagent l'espace
+  d'adressage du kernel : les vrais processus utilisateur arrivent en v0.3.
+- `switch_context(prev, next)` (`arch/x86/switch.asm`) sauve `ebp ebx esi
+  edi` sur la pile courante, mémorise `esp` dans `prev`, charge `esp` de
+  `next`, restaure les registres et `ret`. Un thread neuf reçoit une pile
+  « pré-remplie » avec 4 zéros et l'adresse de `thread_trampoline`, qui
+  réactive les interruptions et appelle la fonction du thread.
+- **Préemption** : à chaque tick (10 ms) le timer appelle `sched_tick()`.
+  Après `SCHED_SLICE_TICKS` (2 ticks = 20 ms) le thread courant passe la
+  main au thread READY suivant (round-robin sur une liste circulaire). Le
+  changement de contexte se fait dans le handler d'IRQ : le thread
+  interrompu reprendra plus tard exactement là, par le `iret` de son stub.
+- `thread_sleep_ms()` met le thread en SLEEPING jusqu'à un tick donné ;
+  `thread_exit()` le passe en ZOMBIE, il est libéré (pile + structure) par
+  le prochain appel à `schedule()` depuis un autre thread.
+- Le thread `idle` (`hlt` en boucle) ne tourne que si rien d'autre n'est prêt.
+- Commandes : `ps` liste les threads, `spawn N` crée N threads de démo qui
+  affichent 3 messages en dormant entre chaque, pendant que le shell reste
+  utilisable.
 
 ### Console
 
@@ -121,10 +171,18 @@ la série : c'est ce qui rend les tests automatiques possibles.
 0x07C00-0x07DFF  stage1
 0x07E00-0x08DFF  stage2
 0x09000-0x09FFF  boot_info (E820)
-0x10000-...      kernel (.text .rodata .data .bss)
-...-0x80000      tas kernel (kmalloc)
+0x10000-...      kernel (.text .rodata .data .bss, dont le bitmap PMM de 128 Ko)
 0x90000          pile temporaire du stage2 (remplacée par celle du kernel)
 0xA0000-0xFFFFF  VGA, ROM BIOS
+0x100000-...     frames allouables par le PMM (répertoire/tables de pages,
+                 pages du tas, piles des threads)
+```
+
+Carte **virtuelle** après `paging_init()` :
+
+```
+0x00000000-fin RAM   identity map (virtuel = physique)
+0xD0000000-0xE0000000 tas kernel (pages mappées à la demande)
 ```
 
 ## 5. Décisions importantes
@@ -134,8 +192,14 @@ la série : c'est ce qui rend les tests automatiques possibles.
   comprendre le passage mode réel → mode protégé.
 - **Kernel à 0x10000 (64 Ko) plutôt qu'à 1 Mo** : évite d'avoir à copier le
   kernel après le passage en mode protégé (le BIOS ne peut charger qu'en
-  dessous de 1 Mo). Limite : ~450 Ko de kernel + tas. Suffisant pour v0.1 ;
-  sera revu avec la pagination en v0.2.
+  dessous de 1 Mo). Depuis la v0.2 le tas et les piles des threads sont dans
+  les frames au-dessus de 1 Mo, donc la seule limite restante est la taille
+  du binaire kernel (~500 Ko). Un « higher-half kernel » (kernel remappé en
+  haut de l'espace virtuel) sera fait quand les processus utilisateur auront
+  besoin de l'espace bas (v0.3).
+- **Threads kernel avant processus utilisateur** : le changement de contexte,
+  la préemption et le sommeil sont testables sans ring 3 ni appels système.
+  Les processus (espace d'adressage privé, ring 3) s'appuieront dessus.
 - **32 bits (i386) d'abord** : plus simple que le mode long 64 bits (pas de
   pagination obligatoire). Le passage à x86_64 est envisagé une fois les
   processus et la mémoire virtuelle en place.
