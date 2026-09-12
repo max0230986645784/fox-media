@@ -1,3 +1,5 @@
+<p align="center"><img src="assets/logo.png" alt="NoxOS" width="200"></p>
+
 # NoxOS — Built from scratch.
 
 NoxOS est un système d'exploitation desktop construit **de zéro** : propre
