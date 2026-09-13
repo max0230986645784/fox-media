@@ -10,7 +10,10 @@ struct registers {
     u32 edi, esi, ebp, esp_dummy, ebx, edx, ecx, eax;  /* pusha */
     u32 int_no, err_code;
     u32 eip, cs, eflags;                               /* pousses par le CPU */
+    u32 useresp, ss;             /* seulement si l'interruption vient du ring 3 */
 } __attribute__((packed));
+
+#define SYSCALL_VECTOR 0x80
 
 typedef void (*irq_handler_t)(struct registers *regs);
 

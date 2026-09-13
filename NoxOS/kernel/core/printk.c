@@ -4,6 +4,21 @@
 #include <nox/serial.h>
 #include <nox/string.h>
 #include <nox/io.h>
+#include <nox/keyboard.h>
+
+char console_getc(void)
+{
+    char c;
+    for (;;) {
+        if (keyboard_poll(&c))
+            return c;
+        if (serial_has_char()) {
+            c = serial_getc();
+            return c == '\r' ? '\n' : c;
+        }
+        hlt();
+    }
+}
 
 typedef __builtin_va_list va_list;
 #define va_start(ap, last) __builtin_va_start(ap, last)

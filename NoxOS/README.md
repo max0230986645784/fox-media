@@ -5,13 +5,16 @@
 NoxOS est un système d'exploitation desktop construit **de zéro** : propre
 bootloader, propre kernel, sans base Linux.
 
-**Version actuelle : v0.2** — bootloader + kernel 32 bits qui démarre dans
-QEMU avec : allocateur de pages physiques, pagination (mémoire virtuelle), tas
-kernel `kmalloc`/`kfree`, threads kernel avec ordonnanceur préemptif
-(round-robin sur le timer), clavier PS/2, console série et shell `nox>`.
+**Version actuelle : v0.3** — bootloader + kernel 32 bits qui démarre dans
+QEMU avec : mémoire virtuelle (pagination, tas kernel), threads préemptifs,
+**disque ATA + système de fichiers NoxFS**, et **programmes utilisateur en
+ring 3** avec espace d'adressage privé et appels système (`int 0x80`). Un
+programme qui plante (page fault, instruction privilégiée) est tué, le
+kernel continue.
 
 ```
-BIOS  ->  boot/stage1 (MBR)  ->  boot/stage2 (mode protégé)  ->  kernel  ->  nox>
+BIOS -> boot/stage1 (MBR) -> boot/stage2 (mode protégé) -> kernel -> nox> run hello
+                                                                        └─> ring 3
 ```
 
 ## Prérequis (Linux)
@@ -26,18 +29,36 @@ sudo apt install build-essential nasm qemu-system-x86
 make            # construit build/noxos.img
 make run        # QEMU avec fenêtre (VGA) + sortie série dans le terminal
 make run-serial # QEMU sans fenêtre : le shell est dans ton terminal (Ctrl+A puis X pour quitter)
-make test       # tests automatiques (boot, clavier, mémoire, tas, threads)
+make test       # 29 tests automatiques (boot, mémoire, threads, disque, ring 3)
 ```
 
-## Commandes du shell v0.2
+## Commandes du shell v0.3
 
-`help` `clear` `echo` `version` `cpu` `memory` `uptime` `ps` `spawn [N]`
-`heaptest` `reboot` `halt`
+`help` `clear` `echo` `version` `cpu` `memory` `frames` `uptime` `ps` `spawn [N]`
+`heaptest` `disk` `ls [dir]` `cat <file>` `cd <dir>` `pwd` `run <prog> [&]`
+`procs` `reboot` `halt`
 
-- `memory` : carte E820, frames libres/utilisées, tables de pages, état du tas
-- `heaptest` : 4 tours d'allocations/libérations + vérification d'intégrité
-- `spawn 3` : lance 3 threads qui écrivent en parallèle pendant que le shell
-  reste utilisable ; `ps` les liste puis montre qu'ils ont été libérés
+- `disk` / `ls` / `cat` : disque ATA détecté, volume NoxFS monté, fichiers de `rootfs/`
+- `run hello` : charge `/bin/hello` depuis NoxFS et l'exécute **en ring 3** ;
+  le shell affiche son code de sortie. `run hello &` = en arrière-plan.
+- `run crash` / `run privileged` : le programme écrit à l'adresse 0 / exécute
+  `cli` → le kernel le tue proprement et rend sa mémoire (`frames` avant/après).
+- `run echo` : lit une ligne au clavier via `SYS_READ` et la renvoie.
+- `spawn 3` / `ps` : threads kernel de démo ; `procs` : processus utilisateur.
+
+## Écrire un programme utilisateur
+
+Un fichier `user/bin/monprog.c` suffit : il est compilé, lié à `0x40000000`
+avec `user/user.ld` + `libnox` (`user/lib/`) et copié dans `/bin/` de l'image.
+
+```c
+#include <nox.h>              /* exit write read getpid yield sleep_ms uptime_ms puts putu */
+int main(void) { puts("salut\n"); return 0; }
+```
+
+Les appels système (`kernel/include/nox/syscall.h`) : `SYS_EXIT SYS_WRITE
+SYS_READ SYS_GETPID SYS_YIELD SYS_SLEEP SYS_UPTIME`. C'est la seule porte
+entre un programme et le kernel.
 
 ## Organisation
 
@@ -45,14 +66,18 @@ make test       # tests automatiques (boot, clavier, mémoire, tas, threads)
 NoxOS/
 ├── boot/           bootloader (stage1 MBR + stage2), assembleur NASM
 ├── kernel/
-│   ├── arch/x86/   entrée, GDT, IDT, stubs d'interruption, PIC, CPUID, switch de contexte
+│   ├── arch/x86/   entrée, GDT+TSS, IDT, stubs d'interruption, PIC, CPUID, switch, passage ring 3
 │   ├── core/       kmain, kprintf/panic, shell
-│   ├── drivers/    VGA texte, série COM1, clavier PS/2, timer PIT
-│   ├── mm/         E820, frames physiques (pmm), pagination, tas (heap)
-│   ├── proc/       threads kernel + ordonnanceur
+│   ├── drivers/    VGA texte, série COM1, clavier PS/2, timer PIT, disque ATA PIO
+│   ├── fs/         NoxFS (lecture)
+│   ├── mm/         E820, frames physiques (pmm), pagination + répertoires par processus, tas
+│   ├── proc/       threads + ordonnanceur, processus ring 3, appels système
 │   ├── lib/        memset/strcmp/itoa...
-│   ├── include/nox/ en-têtes publics du kernel
+│   ├── include/nox/ en-têtes publics du kernel (dont syscall.h partagé avec le userland)
 │   └── linker.ld
+├── user/           userland : libnox (crt0, appels système), programmes de user/bin/
+├── rootfs/         fichiers copiés tels quels dans l'image NoxFS (/etc, /home)
+├── tools/          mknoxfs : construit l'image NoxFS sur la machine hôte
 ├── tests/          tests QEMU automatisés
 ├── docs/           architecture, décisions, roadmap
 └── build/          (généré) objets, kernel.bin, noxos.img

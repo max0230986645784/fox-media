@@ -18,7 +18,7 @@ typedef enum { false = 0, true = 1 } bool;
 
 #define NULL ((void *)0)
 
-#define KERNEL_VERSION "0.2.0"
+#define KERNEL_VERSION "0.3.0"
 #define KERNEL_NAME    "NOXOS KERNEL"
 
 #define NOX_BOOT_MAGIC 0x4E4F5831u /* "NOX1" */

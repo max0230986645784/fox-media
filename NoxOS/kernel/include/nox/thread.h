@@ -1,8 +1,9 @@
 /* NoxOS - threads kernel et ordonnanceur preemptif (round-robin)
  *
- * v0.2 : tous les threads tournent en ring 0 et partagent l'espace
- * d'adressage kernel. Les processus utilisateur (ring 3, espace prive)
- * viendront avec les appels systeme en v0.3.
+ * Chaque thread a une pile kernel. Un thread peut appartenir a un processus
+ * utilisateur (`proc` non nul) : il tourne alors en ring 3 dans l'espace
+ * d'adressage du processus et ne repasse en ring 0 que pour les
+ * interruptions et les appels systeme (sur sa pile kernel, via le TSS).
  */
 #ifndef NOX_THREAD_H
 #define NOX_THREAD_H
@@ -21,6 +22,7 @@ enum thread_state {
 };
 
 typedef void (*thread_fn)(void *arg);
+struct process;
 
 struct thread {
     u32   esp;                      /* DOIT rester le premier champ (switch.asm) */
@@ -30,6 +32,8 @@ struct thread {
     thread_fn entry;
     void *arg;
     u8   *stack;                    /* NULL pour le thread principal */
+    u32   kstack_top;               /* esp0 a installer dans le TSS */
+    struct process *proc;           /* NULL pour un thread kernel pur */
     u32   wake_tick;
     u32   run_ticks;                /* temps CPU consomme */
     struct thread *next;            /* liste circulaire de tous les threads */

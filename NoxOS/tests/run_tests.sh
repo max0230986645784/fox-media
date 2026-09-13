@@ -7,6 +7,8 @@
 #    - que le clavier PS/2 fonctionne (touches envoyees via le moniteur QEMU)
 #    - que le shell repond a des commandes envoyees par le port serie
 #    - v0.2 : PMM, pagination, tas (heaptest), threads preemptifs (spawn/ps)
+#    - v0.3 : disque ATA + NoxFS (disk/ls/cat), processus ring 3 (run),
+#             appels systeme, isolation (un programme fautif est tue seul)
 #  Toute la sortie du kernel (VGA = serie) est enregistree dans
 #  build/test-serial.log puis analysee.
 #
@@ -50,6 +52,17 @@ serial_send() {
     serial_send "spawn 3"
     sleep 3                                     # les threads demo tournent
     serial_send "ps"
+    serial_send "disk"
+    serial_send "ls /etc"
+    serial_send "cat /etc/nox-release"
+    serial_send "run hello"
+    sleep 1
+    serial_send "frames"
+    serial_send "run crash"
+    sleep 1.5
+    serial_send "run privileged"
+    serial_send "procs"
+    serial_send "frames"
     exec 3>&-
     echo "quit"
 ) | timeout 40 "$QEMU" \
@@ -68,12 +81,12 @@ check() {
     fi
 }
 
-echo "NoxOS v0.2 boot tests"
+echo "NoxOS v0.3 boot tests"
 check "NOXOS KERNEL v"                     "kernel banner printed"
 check "System initialized successfully."   "kernel init completed"
 check "E820 entries:"                      "memory map received from bootloader"
 check "nox> version"                       "PS/2 keyboard input reaches the shell"
-check "NoxOS 0.2.0 - Built from scratch."  "'version' command works"
+check "NoxOS 0.3.0 - Built from scratch."  "'version' command works"
 check "list available commands"            "'help' via serial works"
 check "serial ok"                          "'echo' via serial works"
 check "Total usable :"                     "'memory' command works"
@@ -85,6 +98,29 @@ check "[demo-00] step 1/3"                 "thread demo-00 ran (preempted shell)
 check "[demo-02] finished"                 "threads sleep/wake and exit"
 check "2 threads:"                         "finished threads were reaped (ps)"
 check "main"                               "'ps' lists the main thread"
+check "ata0: QEMU HARDDISK"                "ATA PIO disk detected"
+check "noxfs: 'NoxOS' mounted"             "NoxFS volume mounted at boot"
+check "NoxFS    : 'NoxOS' v1 at LBA 2048"  "'disk' command works"
+check "nox-release"                        "'ls /etc' lists files"
+check "VERSION=0.3"                        "'cat' reads a file from NoxFS"
+check "Bonjour depuis le ring 3 ! pid=1"   "user program runs in ring 3 (SYS_WRITE, SYS_GETPID)"
+check "hello: tick 3"                      "SYS_SLEEP + preemption from ring 3"
+check "[pid 1 exited with code 42]"        "SYS_EXIT code returned to the shell"
+check "Page fault in pid 2 (crash)"        "page fault in ring 3 kills only the process"
+check "[pid 2 exited with code -1]"        "crashed process reaped, shell alive"
+check "General protection fault in pid 3"  "privileged instruction in ring 3 -> GPF -> killed"
+check "0 running process(es):"             "all processes terminated (procs)"
+
+# Fuite memoire : 'frames' avant et apres deux processus tues doit donner
+# exactement la meme ligne (pages, tables et repertoire rendus au PMM).
+if [ "$(grep -c '^frames used:' "$LOG")" -eq 2 ] && \
+   [ "$(grep '^frames used:' "$LOG" | uniq | wc -l)" -eq 1 ]; then
+    echo "  [PASS] no frame leak after process exit"
+else
+    echo "  [FAIL] frame count changed after processes exited"
+    grep '^frames used:' "$LOG"
+    fail=1
+fi
 
 if grep -q "KERNEL PANIC" "$LOG" 2>/dev/null; then
     echo "  [FAIL] kernel panic detected"

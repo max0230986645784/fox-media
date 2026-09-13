@@ -22,7 +22,7 @@ QEMU      := qemu-system-i386
 CFLAGS    := -m32 -std=gnu11 -ffreestanding -fno-pie -fno-stack-protector \
              -fno-builtin -nostdlib -nostdinc -O2 -Wall -Wextra -Werror \
              -mno-sse -mno-mmx -mno-80387 -mgeneral-regs-only \
-             -D__KERNEL__ -I$(KERNEL_DIR)/include
+             -D__KERNEL__ -I$(KERNEL_DIR)/include -MMD -MP
 HOSTCC    := gcc
 LDFLAGS   := -m elf_i386 -T $(KERNEL_DIR)/linker.ld -nostdlib
 ASFLAGS32 := -f elf32
@@ -35,7 +35,8 @@ KERNEL_ASM := $(KERNEL_DIR)/arch/$(ARCH)/entry.asm \
               $(KERNEL_DIR)/arch/$(ARCH)/gdt_flush.asm \
               $(KERNEL_DIR)/arch/$(ARCH)/idt_flush.asm \
               $(KERNEL_DIR)/arch/$(ARCH)/isr.asm \
-              $(KERNEL_DIR)/arch/$(ARCH)/switch.asm
+              $(KERNEL_DIR)/arch/$(ARCH)/switch.asm \
+              $(KERNEL_DIR)/arch/$(ARCH)/user_enter.asm
 KERNEL_C   := $(wildcard $(KERNEL_DIR)/core/*.c) \
               $(wildcard $(KERNEL_DIR)/arch/$(ARCH)/*.c) \
               $(wildcard $(KERNEL_DIR)/drivers/*.c) \
@@ -46,6 +47,13 @@ KERNEL_C   := $(wildcard $(KERNEL_DIR)/core/*.c) \
 
 KERNEL_OBJ := $(patsubst %.asm,$(BUILD)/%.o,$(KERNEL_ASM)) \
               $(patsubst %.c,$(BUILD)/%.o,$(KERNEL_C))
+
+# --- Userland : libnox + programmes (binaires plats charges a 0x40000000) -----
+USER_DIR   := user
+USER_CFLAGS:= $(filter-out -D__KERNEL__,$(CFLAGS)) -I$(USER_DIR)/include
+USER_LIB   := $(BUILD)/$(USER_DIR)/lib/crt0.o $(BUILD)/$(USER_DIR)/lib/nox.o
+USER_SRC   := $(wildcard $(USER_DIR)/bin/*.c)
+USER_BIN   := $(patsubst $(USER_DIR)/bin/%.c,$(BUILD)/$(USER_DIR)/bin/%,$(USER_SRC))
 
 IMAGE      := $(BUILD)/noxos.img
 KERNEL_ELF := $(BUILD)/kernel.elf
@@ -94,9 +102,23 @@ $(MKNOXFS): tools/mknoxfs.c $(KERNEL_DIR)/include/nox/noxfs.h
 	@mkdir -p $(BUILD)
 	$(HOSTCC) -O2 -Wall -Wextra -Werror -o $@ $<
 
-$(FS_IMAGE): $(MKNOXFS) $(shell find $(ROOTFS_SRC) -type f)
-	rm -rf $(ROOTFS) && mkdir -p $(ROOTFS)
+$(BUILD)/$(USER_DIR)/lib/crt0.o: $(USER_DIR)/lib/crt0.asm
+	@mkdir -p $(dir $@)
+	$(AS) $(ASFLAGS32) $< -o $@
+
+$(BUILD)/$(USER_DIR)/%.o: $(USER_DIR)/%.c
+	@mkdir -p $(dir $@)
+	$(CC) $(USER_CFLAGS) -c $< -o $@
+
+# crt0.o en premier : _start doit etre au tout debut du binaire.
+$(BUILD)/$(USER_DIR)/bin/%: $(BUILD)/$(USER_DIR)/bin/%.o $(USER_LIB) $(USER_DIR)/user.ld
+	$(LD) -m elf_i386 -T $(USER_DIR)/user.ld -nostdlib -o $@.elf $(USER_LIB) $<
+	$(OBJCOPY) -O binary --set-section-flags .bss=alloc,load,contents $@.elf $@
+
+$(FS_IMAGE): $(MKNOXFS) $(USER_BIN) $(shell find $(ROOTFS_SRC) -type f)
+	rm -rf $(ROOTFS) && mkdir -p $(ROOTFS)/bin
 	cp -r $(ROOTFS_SRC)/. $(ROOTFS)/
+	cp $(USER_BIN) $(ROOTFS)/bin/
 	$(MKNOXFS) $@ $(FS_BLOCKS) $(ROOTFS) NoxOS
 
 # --- Image disque : [stage1][stage2][kernel] ... 1 Mo ... [NoxFS] -------------
@@ -123,3 +145,5 @@ test: $(IMAGE)
 
 clean:
 	rm -rf $(BUILD)
+
+-include $(KERNEL_OBJ:.o=.d)

@@ -22,14 +22,18 @@ Chaque version doit **fonctionner et être testée** avant la suivante.
 - [x] `sleep`, `exit`, thread idle, commandes `ps` / `spawn` / `heaptest`
 - [x] tests QEMU étendus (`make test`)
 
-## v0.3 — Processus, disque et sécurité de base
+## v0.3 — Processus, disque (fait)
 
-- [ ] kernel remappé en haut de l'espace virtuel (higher half)
-- [ ] processus avec espace d'adressage privé (un répertoire de pages par processus)
-- [ ] mode utilisateur (ring 3), TSS, appels système
-- [ ] pilote disque ATA (PIO) et premier système de fichiers NoxFS (lecture seule d'abord)
-- [ ] séparation SYSTEM / USER dans le système de fichiers
-- [ ] comptes, permissions, privilèges administrateur
+- [x] pilote disque ATA PIO (LBA28, lecture/écriture de secteurs)
+- [x] NoxFS : format simple (superbloc, bitmap, table de 256 entrées, fichiers
+      contigus), outil hôte `mknoxfs`, lecture dans le kernel, `ls`/`cat`/`cd`
+- [x] processus avec espace d'adressage privé (un répertoire de pages par processus)
+- [x] mode utilisateur (ring 3), TSS, appels système `int 0x80`
+- [x] chargement d'un programme depuis NoxFS (`run`), libnox, programmes de test
+- [x] une faute en ring 3 tue le processus seulement ; sa mémoire est rendue
+- [ ] higher-half kernel : pas nécessaire pour l'instant (le kernel reste
+      identity-mappé en bas, le userland est à 0x40000000-0x80000000)
+- [ ] séparation SYSTEM / USER, comptes, permissions → v0.6
 
 ## v0.4 — Graphique
 

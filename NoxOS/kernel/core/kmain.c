@@ -21,6 +21,7 @@
 #include <nox/pmm.h>
 #include <nox/paging.h>
 #include <nox/thread.h>
+#include <nox/process.h>
 #include <nox/timer.h>
 #include <nox/ata.h>
 #include <nox/fs.h>
@@ -101,6 +102,7 @@ void kmain(u32 magic, const struct boot_info *info)
 
     step("scheduler");
     sched_init();
+    process_init();
 
     sti();
 
