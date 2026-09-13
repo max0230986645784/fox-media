@@ -13,6 +13,7 @@
 #include <nox/io.h>
 #include <nox/process.h>
 #include <nox/string.h>
+#include <nox/fb.h>
 
 #define PD_INDEX(v)  (((v) >> 22) & 0x3FF)
 #define PT_INDEX(v)  (((v) >> 12) & 0x3FF)
@@ -184,6 +185,12 @@ void paging_init(void)
      * paging_create_directory). 64 tables = 256 Ko. */
     for (uintptr_t a = KHEAP_START; a < KHEAP_END; a += 1u << 22)
         get_table(a, true);
+
+    /* Framebuffer VBE (hors RAM, typiquement 0xFD000000) : identity-mappe
+     * avant d'activer la pagination pour que la console reste visible. */
+    if (fb_active())
+        for (uintptr_t a = fb_phys(); a < fb_phys() + fb_size(); a += PAGE_SIZE)
+            paging_map(a, a, PTE_WRITE);
 
     isr_register_exception_handler(14, page_fault_handler);
 

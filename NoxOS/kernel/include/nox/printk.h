@@ -6,6 +6,12 @@
 
 void kputc(char c);
 void kputs(const char *s);
+/* Couleurs (valeurs enum vga_color) et effacement, quelle que soit la console. */
+void console_set_color(int fg, int bg);
+void console_clear(void);
+/* Redirige la sortie kernel (ecran) vers un puits, ex. le terminal du bureau.
+ * NULL = retour a la console VGA/framebuffer. Le port serie recoit toujours. */
+void console_set_sink(void (*sink)(char));
 /* Attend un caractere du clavier PS/2 ou du port serie (bloquant). */
 char console_getc(void);
 

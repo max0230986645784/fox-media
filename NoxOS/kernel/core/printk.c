@@ -5,6 +5,27 @@
 #include <nox/string.h>
 #include <nox/io.h>
 #include <nox/keyboard.h>
+#include <nox/fbcon.h>
+
+static void (*console_sink)(char);
+
+void console_set_sink(void (*sink)(char)) { console_sink = sink; }
+
+void console_set_color(int fg, int bg)
+{
+    if (fbcon_active())
+        fbcon_set_color(fg, bg);
+    else
+        vga_set_color((enum vga_color)fg, (enum vga_color)bg);
+}
+
+void console_clear(void)
+{
+    if (fbcon_active())
+        fbcon_clear();
+    else
+        vga_clear();
+}
 
 char console_getc(void)
 {
@@ -27,7 +48,12 @@ typedef __builtin_va_list va_list;
 
 void kputc(char c)
 {
-    vga_putc(c);
+    if (console_sink)
+        console_sink(c);
+    else if (fbcon_active())
+        fbcon_putc(c);
+    else
+        vga_putc(c);
     serial_putc(c);
 }
 
@@ -129,7 +155,7 @@ void kprintf(const char *fmt, ...)
 void panic(const char *fmt, ...)
 {
     cli();
-    vga_set_color(VGA_WHITE, VGA_RED);
+    console_set_color(VGA_WHITE, VGA_RED);
     kputs("\n*** KERNEL PANIC *** ");
     va_list ap;
     va_start(ap, fmt);

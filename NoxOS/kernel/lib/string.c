@@ -95,3 +95,41 @@ char *itoa(i32 value, char *buf)
     }
     return utoa((u32)value, buf, 10);
 }
+
+void *memmove(void *dst, const void *src, size_t n)
+{
+    u8 *d = dst;
+    const u8 *s = src;
+    if (d == s || n == 0)
+        return dst;
+    if (d < s || d >= s + n) {
+        while (n--) *d++ = *s++;
+    } else {
+        d += n; s += n;
+        while (n--) *--d = *--s;
+    }
+    return dst;
+}
+
+char *strncpy(char *dst, const char *src, size_t n)
+{
+    size_t i = 0;
+    for (; i < n && src[i]; i++) dst[i] = src[i];
+    for (; i < n; i++) dst[i] = '\0';
+    return dst;
+}
+
+char *strchr(const char *s, int c)
+{
+    for (; *s; s++)
+        if (*s == (char)c) return (char *)s;
+    return c == 0 ? (char *)s : NULL;
+}
+
+char *strrchr(const char *s, int c)
+{
+    const char *last = NULL;
+    for (; *s; s++)
+        if (*s == (char)c) last = s;
+    return (char *)last;
+}

@@ -27,7 +27,7 @@ HOSTCC    := gcc
 LDFLAGS   := -m elf_i386 -T $(KERNEL_DIR)/linker.ld -nostdlib
 ASFLAGS32 := -f elf32
 
-STAGE2_SECTORS := 4
+STAGE2_SECTORS := 6
 
 # --- Sources kernel -----------------------------------------------------------
 # entry.o doit etre le premier objet lie : c'est l'adresse 0x10000.
@@ -43,6 +43,7 @@ KERNEL_C   := $(wildcard $(KERNEL_DIR)/core/*.c) \
               $(wildcard $(KERNEL_DIR)/mm/*.c) \
               $(wildcard $(KERNEL_DIR)/proc/*.c) \
               $(wildcard $(KERNEL_DIR)/fs/*.c) \
+              $(wildcard $(KERNEL_DIR)/gfx/*.c) \
               $(wildcard $(KERNEL_DIR)/lib/*.c)
 
 KERNEL_OBJ := $(patsubst %.asm,$(BUILD)/%.o,$(KERNEL_ASM)) \
@@ -87,7 +88,7 @@ $(KERNEL_BIN): $(KERNEL_ELF)
 	$(OBJCOPY) -O binary $< $@
 
 # --- Bootloader ---------------------------------------------------------------
-$(STAGE1_BIN): $(BOOT_DIR)/stage1.asm
+$(STAGE1_BIN): $(BOOT_DIR)/stage1.asm Makefile
 	@mkdir -p $(BUILD)
 	$(AS) -f bin -DSTAGE2_SECTORS=$(STAGE2_SECTORS) $< -o $@
 

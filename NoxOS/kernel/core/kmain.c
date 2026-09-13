@@ -13,6 +13,8 @@
 #include <nox/types.h>
 #include <nox/printk.h>
 #include <nox/vga.h>
+#include <nox/fb.h>
+#include <nox/fbcon.h>
 #include <nox/serial.h>
 #include <nox/gdt.h>
 #include <nox/idt.h>
@@ -35,11 +37,11 @@ extern u8 _kernel_end[];
 
 static void print_banner(void)
 {
-    vga_set_color(VGA_LIGHT_CYAN, VGA_BLACK);
+    console_set_color(VGA_LIGHT_CYAN, VGA_BLACK);
     kprintf("\n  %s v%s\n", KERNEL_NAME, KERNEL_VERSION);
-    vga_set_color(VGA_DARK_GREY, VGA_BLACK);
+    console_set_color(VGA_DARK_GREY, VGA_BLACK);
     kprintf("  NoxOS - Built from scratch.\n\n");
-    vga_set_color(VGA_LIGHT_GREY, VGA_BLACK);
+    console_set_color(VGA_LIGHT_GREY, VGA_BLACK);
 }
 
 static void step(const char *what)
@@ -50,7 +52,10 @@ static void step(const char *what)
 void kmain(u32 magic, const struct boot_info *info)
 {
     serial_init();
-    vga_init();
+    if (magic == NOX_BOOT_MAGIC && fb_init(info))
+        fbcon_init();
+    else
+        vga_init();
     print_banner();
 
     if (magic != NOX_BOOT_MAGIC)
@@ -77,6 +82,11 @@ void kmain(u32 magic, const struct boot_info *info)
     step("paging");
     paging_init();
     kprintf("       identity map 0 - 0x%x, %u page tables\n", pmm_ram_top(), paging_table_count());
+    if (fb_active())
+        kprintf("       framebuffer %dx%d @ 0x%x (%u KB mapped)\n",
+                fb_width(), fb_height(), fb_phys(), fb_size() / 1024);
+    else
+        kprintf("       no VBE framebuffer, VGA text console\n");
 
     step("heap");
     heap_init();
@@ -110,9 +120,9 @@ void kmain(u32 magic, const struct boot_info *info)
     cpu_detect(&cpu);
     kprintf("       cpu: %s\n", cpu.brand);
 
-    vga_set_color(VGA_LIGHT_GREEN, VGA_BLACK);
+    console_set_color(VGA_LIGHT_GREEN, VGA_BLACK);
     kprintf("\nSystem initialized successfully.\n\n");
-    vga_set_color(VGA_LIGHT_GREY, VGA_BLACK);
+    console_set_color(VGA_LIGHT_GREY, VGA_BLACK);
 
     shell_run();
 }

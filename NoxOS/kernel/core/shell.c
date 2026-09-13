@@ -91,7 +91,7 @@ static void cmd_help(int argc, char **argv)
 static void cmd_clear(int argc, char **argv)
 {
     (void)argc; (void)argv;
-    vga_clear();
+    console_clear();
 }
 
 static void cmd_echo(int argc, char **argv)
@@ -453,13 +453,13 @@ void shell_run(void)
     kprintf("Type 'help' for a list of commands.\n\n");
 
     for (;;) {
-        vga_set_color(VGA_LIGHT_CYAN, VGA_BLACK);
+        console_set_color(VGA_LIGHT_CYAN, VGA_BLACK);
         u32 pid;
         int code;
         while (process_collect(&pid, &code))
             kprintf("[pid %u exited with code %d]\n", pid, code);
         kputs("nox> ");
-        vga_set_color(VGA_LIGHT_GREY, VGA_BLACK);
+        console_set_color(VGA_LIGHT_GREY, VGA_BLACK);
 
         read_line(line, LINE_MAX);
         int argc = split_args(line, argv);
