@@ -79,6 +79,11 @@ static bool map_region(uintptr_t dir, uintptr_t virt, u32 pages,
     return true;
 }
 
+static u32 console_owner_pid;
+
+void console_set_owner(u32 pid) { console_owner_pid = pid; }
+u32  console_owner(void)        { return console_owner_pid; }
+
 int process_spawn(const char *path)
 {
     int idx = fs_lookup(path, 0);

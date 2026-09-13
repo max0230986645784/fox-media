@@ -179,6 +179,9 @@ void thread_yield(void)
 
 void thread_sleep_ms(u32 ms)
 {
+    /* borne : au-dela de ~24 jours on plafonne (evite le debordement 32 bits) */
+    if (ms > 0x7FFFFFFFu / TIMER_HZ)
+        ms = 0x7FFFFFFFu / TIMER_HZ;
     u32 ticks = (ms * TIMER_HZ + 999) / 1000;
     u32 flags = irq_save();
     current->wake_tick = timer_ticks() + (ticks ? ticks : 1);

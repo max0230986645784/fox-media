@@ -22,6 +22,7 @@
 #define NOX_EINVAL    1   /* argument invalide             */
 #define NOX_EFAULT    2   /* adresse hors espace utilisateur */
 #define NOX_ENOSYS    3   /* appel inexistant              */
+#define NOX_EBUSY     4   /* console detenue par un autre  */
 
 #ifdef __KERNEL__
 #include <nox/idt.h>

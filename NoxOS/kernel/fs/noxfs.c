@@ -23,6 +23,30 @@ static bool read_block(u32 block, void *buf)
     return ata_read(NOXFS_DISK_LBA + block * SECTORS_PER_BLOCK, SECTORS_PER_BLOCK, buf);
 }
 
+/* Une entree corrompue ne doit jamais atteindre le reste du kernel : nom
+ * termine, parent existant (et pas soi-meme), donnees dans le volume. */
+static bool entry_valid(u32 i)
+{
+    const struct noxfs_entry *e = &entries[i];
+    if (e->type == NOXFS_FREE)
+        return true;
+    if (e->type != NOXFS_FILE && e->type != NOXFS_DIR)
+        return false;
+    if (e->name[NOXFS_NAME_MAX] != '\0')
+        return false;
+    if (i != 0 && (e->parent >= NOXFS_MAX_ENTRIES || e->parent == i ||
+                   entries[e->parent].type != NOXFS_DIR))
+        return false;
+    if (e->type == NOXFS_FILE) {
+        u32 needed = (e->size + NOXFS_BLOCK_SIZE - 1) / NOXFS_BLOCK_SIZE;
+        if (e->blocks < needed || e->start < super.data_start ||
+            e->start + e->blocks < e->start ||
+            e->start + e->blocks > super.total_blocks)
+            return false;
+    }
+    return true;
+}
+
 bool fs_init(void)
 {
     mounted = false;
@@ -38,8 +62,13 @@ bool fs_init(void)
     for (u32 b = 0; b < NOXFS_ENTRY_BLOCKS; b++)
         if (!read_block(2 + b, (u8 *)entries + b * NOXFS_BLOCK_SIZE))
             return false;
-    if (entries[0].type != NOXFS_DIR)
+    if (entries[0].type != NOXFS_DIR || entries[0].parent != NOXFS_NO_PARENT)
         return false;
+    if (super.total_blocks > NOXFS_MAX_BLOCKS || super.data_start != NOXFS_DATA_START)
+        return false;
+    for (u32 i = 0; i < NOXFS_MAX_ENTRIES; i++)
+        if (!entry_valid(i))
+            return false;
     mounted = true;
     return true;
 }

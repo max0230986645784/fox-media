@@ -115,7 +115,17 @@ $(BUILD)/$(USER_DIR)/bin/%: $(BUILD)/$(USER_DIR)/bin/%.o $(USER_LIB) $(USER_DIR)
 	$(LD) -m elf_i386 -T $(USER_DIR)/user.ld -nostdlib -o $@.elf $(USER_LIB) $<
 	$(OBJCOPY) -O binary --set-section-flags .bss=alloc,load,contents $@.elf $@
 
-$(FS_IMAGE): $(MKNOXFS) $(USER_BIN) $(shell find $(ROOTFS_SRC) -type f)
+# Manifeste = liste des fichiers du rootfs + programmes : regenere a chaque
+# make, mais seulement REECRIT s'il change, pour que la suppression d'un
+# fichier declenche aussi la reconstruction de l'image.
+FS_MANIFEST := $(BUILD)/noxfs.manifest
+.PHONY: $(FS_MANIFEST).tmp
+$(FS_MANIFEST): $(FS_MANIFEST).tmp
+	@mkdir -p $(BUILD)
+	@{ find $(ROOTFS_SRC) -type f | sort; printf '%s\n' $(USER_BIN); } > $@.new
+	@if cmp -s $@.new $@; then rm -f $@.new; else mv $@.new $@; fi
+
+$(FS_IMAGE): $(MKNOXFS) $(USER_BIN) $(FS_MANIFEST) $(shell find $(ROOTFS_SRC) -type f)
 	rm -rf $(ROOTFS) && mkdir -p $(ROOTFS)/bin
 	cp -r $(ROOTFS_SRC)/. $(ROOTFS)/
 	cp $(USER_BIN) $(ROOTFS)/bin/

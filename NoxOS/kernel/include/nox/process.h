@@ -49,6 +49,12 @@ int  process_wait(u32 pid);
  * libere son entree. false s'il n'y en a aucun. */
 bool process_collect(u32 *pid, int *code);
 struct process *process_current(void);        /* NULL depuis un thread kernel */
+
+/* Proprietaire de la console : seul ce pid peut lire le clavier (SYS_READ).
+ * 0 = le shell kernel. Le shell le donne au processus lance au premier plan
+ * et le reprend quand celui-ci se termine. */
+void console_set_owner(u32 pid);
+u32  console_owner(void);
 struct process *process_by_pid(u32 pid);
 u32  process_count(void);
 void process_dump(void);

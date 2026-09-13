@@ -199,7 +199,9 @@ static void cmd_run(int argc, char **argv)
         kprintf("[%d] %s\n", pid, path);
         return;
     }
+    console_set_owner((u32)pid);
     int code = process_wait((u32)pid);
+    console_set_owner(0);
     kprintf("[pid %d exited with code %d]\n", pid, code);
 }
 

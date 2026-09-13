@@ -33,6 +33,8 @@ static int sys_read(u32 fd, char *buf, u32 len)
 {
     if (fd != 0)
         return -NOX_EINVAL;
+    if (console_owner() != process_current()->pid)
+        return -NOX_EBUSY;
     if (!user_range_ok(buf, len))
         return -NOX_EFAULT;
     u32 n = 0;
@@ -55,6 +57,11 @@ static int sys_read(u32 fd, char *buf, u32 len)
 
 void syscall_dispatch(struct registers *regs)
 {
+    if ((regs->cs & 3) != 3 || !process_current()) {
+        kprintf("[syscall] int 0x80 from ring 0 ignored (eip=0x%x)\n", regs->eip);
+        regs->eax = (u32)-NOX_ENOSYS;
+        return;
+    }
     sti();
     u32 nr = regs->eax, a = regs->ebx, b = regs->ecx, c = regs->edx;
     int ret;
