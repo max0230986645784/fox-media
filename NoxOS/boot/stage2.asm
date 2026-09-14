@@ -42,6 +42,7 @@ BOOT_INFO         equ 0x9000
 E820_ENTRIES      equ BOOT_INFO + 48
 VBE_INFO          equ 0x8A00              ; VbeInfoBlock (512 octets)
 VBE_MODE_INFO     equ 0x8C00              ; ModeInfoBlock (256 octets)
+VBE_MAX_W         equ 1920                ; largeur maximale retenue (1080p)
 NOX_BOOT_MAGIC    equ 0x4E4F5831          ; "NOX1"
 SECTORS_PER_READ  equ 32                  ; 16 Ko par appel BIOS
 
@@ -215,8 +216,9 @@ disk_error:
     jmp .hang
 
 ; -----------------------------------------------------------------------------
-; set_video_mode : cherche dans la liste VBE un mode lineaire 32 bpp de
-;   1024x768 (a defaut 800x600) et l'active. Remplit boot_info.fb_*.
+; set_video_mode : cherche dans la liste VBE le plus grand mode lineaire
+;   32 bpp de largeur <= VBE_MAX_W (1920x1080 vise ; 16:9 prefere a largeur
+;   egale) et l'active. Remplit boot_info.fb_*.
 ;   En cas d'echec, fb_addr reste 0 et le kernel garde la console texte.
 ; -----------------------------------------------------------------------------
 set_video_mode:
@@ -238,6 +240,7 @@ set_video_mode:
     mov fs, ax                          ; fs:si = liste (terminee par 0xFFFF)
     mov word [best_mode], 0
     mov word [best_w], 0
+    mov word [best_h], 0
 .next:
     mov cx, [fs:si]
     add si, 2
@@ -259,27 +262,30 @@ set_video_mode:
     cmp byte [VBE_MODE_INFO + 27], 6    ; modele memoire : direct color
     jne .next
     mov ax, [VBE_MODE_INFO + 18]        ; largeur
-    cmp ax, 1024
-    je .candidate
-    cmp ax, 800
-    jne .next
-    cmp word [best_w], 1024             ; on a deja mieux
-    je .next
-.candidate:
     mov bx, [VBE_MODE_INFO + 20]        ; hauteur
-    cmp ax, 1024
-    jne .h600
-    cmp bx, 768
+    cmp ax, VBE_MAX_W
+    ja .next
+    cmp ax, 640
+    jb .next
+    cmp ax, [best_w]
+    ja .take                            ; plus large : on prend
     jne .next
-    jmp .take
-.h600:
-    cmp bx, 600
+    ; meme largeur : on prefere le 16:9 (h*16 == w*9)
+    push dx
+    push ax
+    mov dx, bx
+    shl dx, 4                           ; h*16
+    mov ax, [VBE_MODE_INFO + 18]
+    imul ax, ax, 9                      ; w*9
+    cmp ax, dx
+    pop ax
+    pop dx
     jne .next
 .take:
     mov [best_mode], cx
     mov [best_w], ax
-    cmp ax, 1024
-    jne .next                           ; 800x600 trouve : on continue a chercher
+    mov [best_h], bx
+    jmp .next
 .choose:
     mov cx, [best_mode]
     test cx, cx
@@ -315,6 +321,7 @@ set_video_mode:
 
 best_mode dw 0
 best_w    dw 0
+best_h    dw 0
 
 print:
     pusha

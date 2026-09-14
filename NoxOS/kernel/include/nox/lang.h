@@ -21,6 +21,10 @@ enum str_id {
     STR_REBOOT,
     STR_APPS,
     STR_SYSTEM,
+    STR_SEARCH,             /* "Rechercher" */
+    STR_SEARCH_HINT,        /* "Tapez pour chercher apps et fichiers" */
+    STR_NO_RESULT,
+    STR_FILES,
     STR_CLOSE,
     STR_HOME,
     STR_COMPUTER,

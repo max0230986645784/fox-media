@@ -8,8 +8,9 @@
  *      barre des taches -> menu -> curseur, dans un backbuffer, puis copie
  *      d'un bloc vers le framebuffer (pas de scintillement).
  *
- * Style : barre des taches "pilule" centree (maquette utilisateur), fenetres
- * a coins arrondis avec pastilles de fermeture a gauche, horloge a droite.
+ * Style : barre des taches flottante en bas (maquette utilisateur) : logo Nox
+ * (menu) + champ "Rechercher" a gauche, fenetres ouvertes au centre, langue +
+ * horloge a droite. Fenetres a coins arrondis, pastille de fermeture a gauche.
  */
 #include <nox/wm.h>
 #include <nox/desktop.h>
@@ -31,6 +32,9 @@
 #define DOCK_ICON     40
 #define DOCK_PAD      8
 #define MENU_W        300
+#define SEARCH_W      320
+#define SEARCH_MAX    48
+#define SEARCH_ROWS   8
 #define DBLCLICK_MS   400
 
 static struct surface *screen, *back, *wallpaper;
@@ -55,8 +59,16 @@ static struct rect menu_rect;
 struct dock_item { struct rect r; enum app_icon icon; struct window *win; };
 static struct dock_item dock_items[24];
 static int dock_count;
-static struct rect dock_rect;
+static struct rect dock_rect, search_rect;
 static int hover_x = -1, hover_y = -1;
+/* recherche (apps + fichiers NoxFS) */
+static bool search_open;
+static char search_buf[SEARCH_MAX + 1];
+static int  search_len;
+struct search_result { enum app_icon icon; const char *label; char path[96]; int fs_idx; int action; };
+static struct search_result search_results[SEARCH_ROWS];
+static int  search_count;
+static struct rect search_panel;
 
 /* --------------------------------------------------------------------------
  * Fenetres
@@ -417,74 +429,74 @@ static void add_dock_item(int x, int y, enum app_icon icon, struct window *win)
 
 static void draw_taskbar(void)
 {
-    static const enum app_icon launchers[] = { ICON_EXPLORER, ICON_TERMINAL, ICON_SETTINGS, ICON_TASKMGR };
     dock_count = 0;
+    int open_n = 0;
+    for (struct window *t = windows; t; t = t->next)
+        if (!t->popup) open_n++;
 
-    /* fenetres ouvertes non epinglees */
-    int extra = 0;
-    for (struct window *t = windows; t; t = t->next) {
-        if (t->popup) continue;
-        bool pinned = false;
-        for (u32 i = 0; i < 4; i++) if (t->icon == launchers[i]) pinned = true;
-        if (!pinned) extra++;
-    }
-    int slots = 1 + 4 + (extra ? extra : 0);
-    int step = DOCK_ICON + DOCK_PAD + 6;
-    int dock_w = slots * step + 16 + (extra ? 10 : 0);
-    int bar_y = settings.taskbar_top ? 0 : screen->h - TASKBAR_H;
-
-    /* fond leger sur toute la largeur (comme Windows), pilule au centre (macOS) */
-    gfx_fill_alpha(back, (struct rect){ 0, bar_y, screen->w, TASKBAR_H }, RGBA(10, 12, 18, 90));
-    int dock_x = settings.taskbar_left_align ? 12 : (screen->w - dock_w) / 2;
+    int step   = DOCK_ICON + DOCK_PAD + 6;
+    int bar_y  = settings.taskbar_top ? 0 : screen->h - TASKBAR_H;
     int dock_y = bar_y + (TASKBAR_H - DOCK_H) / 2;
+
+    /* pilule gauche : logo (menu) + champ de recherche + fenetres ouvertes */
+    int dock_w = 8 + step + 6 + SEARCH_W + 8 + (open_n ? 6 + open_n * step + 4 : 0) + 4;
+    int dock_x = settings.taskbar_left_align ? 12 : (screen->w - dock_w) / 2;
+    if (!settings.taskbar_left_align && dock_x + dock_w > screen->w - 12 - 170)
+        dock_x = 12;
     dock_rect = (struct rect){ dock_x, dock_y, dock_w, DOCK_H };
-    gfx_fill_rounded(back, dock_rect, 16, C_PANEL);
-    gfx_rect(back, dock_rect, RGBA(255, 255, 255, 25));
+    gfx_fill_rounded(back, (struct rect){ dock_x + 1, dock_y + 3, dock_w, DOCK_H }, 18, C_SHADOW);
+    gfx_fill_rounded(back, dock_rect, 18, C_PANEL);
+    gfx_rect(back, dock_rect, RGBA(255, 255, 255, 30));
 
     int x = dock_x + 8, iy = dock_y + (DOCK_H - DOCK_ICON) / 2;
-    /* bouton menu (logo) */
+    /* bouton menu (logo Nox) */
     {
         struct rect hit = { x, iy - DOCK_PAD / 2, DOCK_ICON + DOCK_PAD, DOCK_ICON + DOCK_PAD };
         if (menu_open || rect_contains(hit, hover_x, hover_y))
-            gfx_fill_rounded(back, hit, 10, RGBA(255, 255, 255, 40));
+            gfx_fill_rounded(back, hit, 12, RGBA(255, 255, 255, 40));
         wm_draw_icon(back, x + DOCK_PAD / 2, iy, DOCK_ICON, ICON_NOX);
         add_dock_item(x, iy - DOCK_PAD / 2, ICON_NOX, NULL);
-        x += step;
+        x += step + 6;
     }
-    gfx_vline(back, x - 3, dock_y + 12, DOCK_H - 24, RGBA(255, 255, 255, 40));
-    x += 4;
-    for (u32 i = 0; i < 4; i++) {
-        struct window *open = wm_find_icon(launchers[i]);
-        struct rect hit = { x, iy - DOCK_PAD / 2, DOCK_ICON + DOCK_PAD, DOCK_ICON + DOCK_PAD };
-        if (rect_contains(hit, hover_x, hover_y))
-            gfx_fill_rounded(back, hit, 10, RGBA(255, 255, 255, 40));
-        wm_draw_icon(back, x + DOCK_PAD / 2, iy, DOCK_ICON - 6, launchers[i]);
-        if (open)   /* point sous l'icone = application ouverte */
-            gfx_fill_rounded(back, (struct rect){ x + (DOCK_ICON + DOCK_PAD) / 2 - 3, dock_y + DOCK_H - 7, 6, 4 }, 2,
-                             open == focused ? C_TEXT_LIGHT : RGBA(255, 255, 255, 130));
-        add_dock_item(x, iy - DOCK_PAD / 2, launchers[i], open);
-        x += step;
+    /* champ de recherche (style Windows) */
+    {
+        search_rect = (struct rect){ x, dock_y + 10, SEARCH_W, DOCK_H - 20 };
+        bool hot = search_open || rect_contains(search_rect, hover_x, hover_y);
+        gfx_fill_rounded(back, search_rect, (DOCK_H - 20) / 2, hot ? RGBA(255, 255, 255, 235) : RGBA(255, 255, 255, 200));
+        if (search_open)
+            gfx_rect(back, search_rect, C_ACCENT);
+        /* loupe : cercle + manche */
+        int cx = search_rect.x + 18, cy = search_rect.y + search_rect.h / 2 - 1;
+        gfx_fill_rounded(back, (struct rect){ cx - 6, cy - 6, 12, 12 }, 6, RGB(70, 74, 90));
+        gfx_fill_rounded(back, (struct rect){ cx - 4, cy - 4, 8, 8 }, 4, hot ? RGB(245, 245, 250) : RGB(230, 232, 240));
+        gfx_fill(back, (struct rect){ cx + 4, cy + 4, 3, 7 }, RGB(70, 74, 90));
+        gfx_fill(back, (struct rect){ cx + 5, cy + 5, 3, 7 }, RGB(70, 74, 90));
+        const char *txt = search_len ? search_buf : L(STR_SEARCH);
+        gfx_text(back, search_rect.x + 34, search_rect.y + (search_rect.h - FONT_H) / 2, txt,
+                 search_len ? C_TEXT : RGB(95, 100, 120));
+        x += SEARCH_W + 8;
     }
-    if (extra) {
-        gfx_vline(back, x - 3, dock_y + 12, DOCK_H - 24, RGBA(255, 255, 255, 40));
-        x += 4;
+    /* fenetres ouvertes */
+    if (open_n) {
+        gfx_vline(back, x, dock_y + 12, DOCK_H - 24, RGBA(255, 255, 255, 40));
+        x += 6;
         for (struct window *t = windows; t; t = t->next) {
             if (t->popup) continue;
-            bool pinned = false;
-            for (u32 i = 0; i < 4; i++) if (t->icon == launchers[i]) pinned = true;
-            if (pinned) continue;
             struct rect hit = { x, iy - DOCK_PAD / 2, DOCK_ICON + DOCK_PAD, DOCK_ICON + DOCK_PAD };
+            if (t == focused)
+                gfx_fill_rounded(back, hit, 12, RGBA(255, 255, 255, 28));
             if (rect_contains(hit, hover_x, hover_y))
-                gfx_fill_rounded(back, hit, 10, RGBA(255, 255, 255, 40));
-            wm_draw_icon(back, x + DOCK_PAD / 2 + 4, iy + 4, DOCK_ICON - 14, t->icon);
-            gfx_fill_rounded(back, (struct rect){ x + (DOCK_ICON + DOCK_PAD) / 2 - 3, dock_y + DOCK_H - 7, 6, 4 }, 2,
-                             t == focused ? C_TEXT_LIGHT : RGBA(255, 255, 255, 130));
+                gfx_fill_rounded(back, hit, 12, RGBA(255, 255, 255, 45));
+            wm_draw_icon(back, x + DOCK_PAD / 2 + 3, iy + 3, DOCK_ICON - 6, t->icon);
+            gfx_fill_rounded(back, (struct rect){ x + (DOCK_ICON + DOCK_PAD) / 2 - (t == focused ? 8 : 3),
+                                                  dock_y + DOCK_H - 7, t == focused ? 16 : 6, 3 }, 1,
+                             t == focused ? C_ACCENT : RGBA(255, 255, 255, 140));
             add_dock_item(x, iy - DOCK_PAD / 2, t->icon, t);
             x += step;
         }
     }
 
-    /* zone d'etat a droite : horloge, date, langue */
+    /* pilule droite : langue, horloge, date */
     if (settings.show_clock) {
         struct rtc_time t;
         rtc_read(&t);
@@ -494,14 +506,142 @@ static void draw_taskbar(void)
         date[0] = (char)('0' + t.day / 10); date[1] = (char)('0' + t.day % 10); date[2] = '/';
         date[3] = (char)('0' + t.month / 10); date[4] = (char)('0' + t.month % 10); date[5] = '/';
         utoa(t.year, date + 6, 10);
-        int rx = screen->w - 16;
-        gfx_fill_rounded(back, (struct rect){ rx - 100, dock_y, 100, DOCK_H }, 14, C_PANEL);
-        gfx_text(back, rx - 100 + 50 - gfx_text_width(clock) / 2, dock_y + 10, clock, C_TEXT_LIGHT);
-        gfx_text(back, rx - 100 + 50 - gfx_text_width(date) / 2, dock_y + 30, date, RGBA(255, 255, 255, 150));
+        int rw = 158, rx = screen->w - 12 - rw;
+        struct rect rr = { rx, dock_y, rw, DOCK_H };
+        gfx_fill_rounded(back, (struct rect){ rx + 1, dock_y + 3, rw, DOCK_H }, 18, C_SHADOW);
+        gfx_fill_rounded(back, rr, 18, C_PANEL);
+        gfx_rect(back, rr, RGBA(255, 255, 255, 30));
         const char *lg = lang_get() == LANG_FR ? "FR" : "EN";
-        gfx_fill_rounded(back, (struct rect){ rx - 150, dock_y + 8, 40, DOCK_H - 16 }, 10, C_PANEL);
-        gfx_text(back, rx - 150 + 20 - gfx_text_width(lg) / 2, dock_y + (DOCK_H - FONT_H) / 2, lg, C_TEXT_LIGHT);
+        gfx_fill_rounded(back, (struct rect){ rx + 10, dock_y + 14, 36, DOCK_H - 28 }, 8, RGBA(255, 255, 255, 30));
+        gfx_text(back, rx + 10 + 18 - gfx_text_width(lg) / 2, dock_y + (DOCK_H - FONT_H) / 2, lg, C_TEXT_LIGHT);
+        gfx_vline(back, rx + 56, dock_y + 12, DOCK_H - 24, RGBA(255, 255, 255, 40));
+        int cx = rx + 56 + (rw - 56) / 2;
+        gfx_text(back, cx - gfx_text_width(clock) / 2, dock_y + 10, clock, C_TEXT_LIGHT);
+        gfx_text(back, cx - gfx_text_width(date) / 2, dock_y + 30, date, RGBA(255, 255, 255, 150));
     }
+}
+
+/* --------------------------------------------------------------------------
+ * Recherche : applications (par nom localise) + fichiers NoxFS (par nom)
+ * ------------------------------------------------------------------------ */
+static char lower(char c) { return (c >= 'A' && c <= 'Z') ? (char)(c + 32) : c; }
+
+static bool match_ci(const char *hay, const char *needle)
+{
+    if (!*needle) return true;
+    for (; *hay; hay++) {
+        const char *h = hay, *n = needle;
+        while (*h && *n && lower(*h) == lower(*n)) { h++; n++; }
+        if (!*n) return true;
+    }
+    return false;
+}
+
+static void search_add(enum app_icon icon, const char *label, int fs_idx, int action)
+{
+    if (search_count >= SEARCH_ROWS) return;
+    struct search_result *r = &search_results[search_count++];
+    r->icon = icon; r->label = label; r->fs_idx = fs_idx; r->action = action; r->path[0] = 0;
+    if (fs_idx >= 0) fs_path_of(fs_idx, r->path, sizeof(r->path));
+}
+
+static void search_fs(int dir, int depth)
+{
+    if (depth > 4 || search_count >= SEARCH_ROWS) return;
+    for (int c = fs_next_child(dir, -1); c >= 0 && search_count < SEARCH_ROWS; c = fs_next_child(dir, c)) {
+        const struct noxfs_entry *e = fs_entry(c);
+        if (!e) continue;
+        if (match_ci(e->name, search_buf))
+            search_add(e->type == NOXFS_DIR ? ICON_FOLDER : ICON_FILE, e->name, c, 0);
+        if (e->type == NOXFS_DIR)
+            search_fs(c, depth + 1);
+    }
+}
+
+static void search_update(void)
+{
+    static const struct { enum str_id label; enum app_icon icon; int action; } apps[] = {
+        { STR_EXPLORER, ICON_EXPLORER, 1 }, { STR_TERMINAL, ICON_TERMINAL, 2 },
+        { STR_SETTINGS, ICON_SETTINGS, 3 }, { STR_TASKMGR, ICON_TASKMGR, 4 },
+        { STR_ABOUT, ICON_INFO, 5 },
+    };
+    search_count = 0;
+    search_buf[search_len] = 0;
+    for (u32 i = 0; i < sizeof(apps) / sizeof(apps[0]); i++)
+        if (match_ci(L(apps[i].label), search_buf))
+            search_add(apps[i].icon, L(apps[i].label), -1, apps[i].action);
+    if (search_len && fs_mounted())
+        search_fs(0, 0);
+}
+
+static void search_open_result(const struct search_result *r)
+{
+    search_open = false;
+    search_len = 0;
+    search_buf[0] = 0;
+    if (r->fs_idx >= 0) {
+        const struct noxfs_entry *e = fs_entry(r->fs_idx);
+        if (e && e->type == NOXFS_DIR) app_open_explorer(r->path);
+        else app_open_text(r->path);
+    } else switch (r->action) {
+        case 1: app_open_explorer(NULL); break;
+        case 2: app_open_terminal(); break;
+        case 3: app_open_settings(); break;
+        case 4: app_open_taskmgr(); break;
+        case 5: app_open_about(); break;
+        default: break;
+    }
+    need_redraw = true;
+}
+
+#define SEARCH_ROW_H 44
+
+static void draw_search(void)
+{
+    int w = 420;
+    int h = 16 + FONT_H + 12 + (search_count ? search_count : 1) * SEARCH_ROW_H + 16;
+    int x = search_rect.x - 8;
+    if (x + w > screen->w - 12) x = screen->w - 12 - w;
+    int y = settings.taskbar_top ? TASKBAR_H + 8 : screen->h - TASKBAR_H - 8 - h;
+    search_panel = (struct rect){ x, y, w, h };
+    gfx_fill_rounded(back, (struct rect){ x + 2, y + 4, w, h }, 14, C_SHADOW);
+    gfx_fill_rounded(back, search_panel, 14, RGBA(30, 32, 42, 240));
+    gfx_rect(back, search_panel, RGBA(255, 255, 255, 30));
+    gfx_text(back, x + 16, y + 12, search_len ? L(STR_APPS) : L(STR_SEARCH_HINT), RGBA(255, 255, 255, 140));
+    int ry = y + 12 + FONT_H + 12;
+    if (!search_count) {
+        gfx_text(back, x + 16, ry + (SEARCH_ROW_H - FONT_H) / 2, L(STR_NO_RESULT), RGBA(255, 255, 255, 120));
+        return;
+    }
+    for (int i = 0; i < search_count; i++) {
+        struct search_result *r = &search_results[i];
+        struct rect row = { x + 8, ry, w - 16, SEARCH_ROW_H };
+        if (i == 0 || rect_contains(row, hover_x, hover_y))
+            gfx_fill_rounded(back, row, 8, RGBA(255, 255, 255, i == 0 ? 22 : 35));
+        wm_draw_icon(back, x + 18, ry + 10, 24, r->icon);
+        gfx_text(back, x + 54, ry + (r->fs_idx >= 0 ? 6 : (SEARCH_ROW_H - FONT_H) / 2), r->label, C_TEXT_LIGHT);
+        if (r->fs_idx >= 0)
+            gfx_text(back, x + 54, ry + 6 + FONT_H + 2, r->path, RGBA(255, 255, 255, 120));
+        ry += SEARCH_ROW_H;
+    }
+}
+
+static int search_hit(int mx, int my)
+{
+    int ry = search_panel.y + 12 + FONT_H + 12;
+    for (int i = 0; i < search_count; i++, ry += SEARCH_ROW_H)
+        if (rect_contains((struct rect){ search_panel.x + 8, ry, search_panel.w - 16, SEARCH_ROW_H }, mx, my))
+            return i;
+    return -1;
+}
+
+static void search_key(char c)
+{
+    if (c == 27) { search_open = false; }
+    else if (c == '\n' || c == '\r') { if (search_count) search_open_result(&search_results[0]); }
+    else if (c == 8 || c == 127) { if (search_len) search_len--; search_update(); }
+    else if (c >= 32 && search_len < SEARCH_MAX) { search_buf[search_len++] = c; search_update(); }
+    need_redraw = true;
 }
 
 struct menu_item { enum str_id label; enum app_icon icon; int action; };
@@ -587,6 +727,8 @@ static void compose(void)
     draw_taskbar();
     if (menu_open)
         draw_menu();
+    if (search_open)
+        draw_search();
     draw_cursor(mx, my);
 
     /* presentation : une copie lineaire du backbuffer vers l'ecran */
@@ -633,7 +775,7 @@ static void menu_action(int action)
 
 static void dock_click(enum app_icon icon, struct window *win)
 {
-    if (icon == ICON_NOX) { menu_open = !menu_open; need_redraw = true; return; }
+    if (icon == ICON_NOX) { menu_open = !menu_open; search_open = false; need_redraw = true; return; }
     if (win) { wm_focus(win); return; }
     switch (icon) {
     case ICON_EXPLORER: app_open_explorer(NULL); break;
@@ -679,6 +821,21 @@ static void handle_mouse(const struct mouse_event *m)
             return;
         }
         menu_open = false;
+    }
+    if (search_open) {
+        if (rect_contains(search_panel, m->x, m->y)) {
+            int i = search_hit(m->x, m->y);
+            if (i >= 0) search_open_result(&search_results[i]);
+            return;
+        }
+        if (!rect_contains(search_rect, m->x, m->y))
+            search_open = false;
+    }
+    if (rect_contains(search_rect, m->x, m->y)) {
+        search_open = true;
+        menu_open = false;
+        search_update();
+        return;
     }
     for (int i = 0; i < dock_count; i++)
         if (rect_contains(dock_items[i].r, m->x, m->y)) {
@@ -756,9 +913,7 @@ static void desktop_thread(void *arg)
     u32 last_tick = timer_ticks();
     running = true;
     console_grab_keyboard(true);
-    app_open_explorer(NULL);
-    app_open_terminal();            /* au premier plan : le clavier va au shell */
-    compose();
+    compose();                      /* bureau vide au demarrage : logo + recherche */
 
     for (;;) {
         struct mouse_event m;
@@ -768,6 +923,8 @@ static void desktop_thread(void *arg)
         char c;
         while (keyboard_poll(&c)) {
             if (menu_open && c == 27) { menu_open = false; need_redraw = true; continue; }
+            if (search_open) { search_key(c); continue; }
+            if (!focused) { console_inject(c); continue; }   /* bureau vide : shell noyau */
             send(focused, (struct wm_event){ WM_KEY, 0, 0, 0, c });
             need_redraw = true;
         }

@@ -66,7 +66,7 @@ MKNOXFS    := $(BUILD)/mknoxfs
 ROOTFS_SRC := rootfs
 ROOTFS     := $(BUILD)/rootfs
 FS_IMAGE   := $(BUILD)/noxfs.img
-FS_BLOCKS  := 4096                     # 16 Mo
+FS_BLOCKS  := 8192                     # 32 Mo
 BOOT_AREA  := 1048576                  # 1 Mo reserve avant NoxFS (LBA 2048)
 
 .PHONY: all run run-serial test clean size
