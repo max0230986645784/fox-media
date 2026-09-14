@@ -12,6 +12,10 @@ void console_clear(void);
 /* Redirige la sortie kernel (ecran) vers un puits, ex. le terminal du bureau.
  * NULL = retour a la console VGA/framebuffer. Le port serie recoit toujours. */
 void console_set_sink(void (*sink)(char));
+/* Entree console : le bureau prend le clavier (grab) et renvoie au shell les
+ * touches destinees a la fenetre Terminal via console_inject(). */
+void console_inject(char c);
+void console_grab_keyboard(bool grabbed);
 /* Attend un caractere du clavier PS/2 ou du port serie (bloquant). */
 char console_getc(void);
 

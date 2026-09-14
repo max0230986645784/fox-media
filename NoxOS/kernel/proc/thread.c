@@ -217,6 +217,20 @@ void sched_tick(void)
         schedule();
 }
 
+u32 thread_snapshot(struct thread *out, u32 max)
+{
+    u32 flags = irq_save();
+    u32 n = 0;
+    struct thread *t = current;
+    do {
+        if (n < max)
+            out[n++] = *t;
+        t = t->next;
+    } while (t != current);
+    irq_restore(flags);
+    return n;
+}
+
 void sched_dump(void)
 {
     static const char *state_names[] = { "ready", "running", "sleeping", "zombie" };

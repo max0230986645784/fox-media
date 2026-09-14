@@ -27,11 +27,32 @@ void console_clear(void)
         vga_clear();
 }
 
+#define INJECT_SIZE 128
+static char inject_buf[INJECT_SIZE];
+static u32  inject_head, inject_tail;
+static bool keyboard_grabbed;
+
+void console_inject(char c)
+{
+    u32 next = (inject_head + 1) % INJECT_SIZE;
+    if (next == inject_tail)
+        return;
+    inject_buf[inject_head] = c;
+    inject_head = next;
+}
+
+void console_grab_keyboard(bool grabbed) { keyboard_grabbed = grabbed; }
+
 char console_getc(void)
 {
     char c;
     for (;;) {
-        if (keyboard_poll(&c))
+        if (inject_head != inject_tail) {
+            c = inject_buf[inject_tail];
+            inject_tail = (inject_tail + 1) % INJECT_SIZE;
+            return c;
+        }
+        if (!keyboard_grabbed && keyboard_poll(&c))
             return c;
         if (serial_has_char()) {
             c = serial_getc();

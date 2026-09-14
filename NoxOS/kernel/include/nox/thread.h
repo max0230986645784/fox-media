@@ -48,5 +48,8 @@ void           thread_exit(void) __attribute__((noreturn));
 u32            thread_count(void);
 void           sched_tick(void);            /* appele par l'IRQ timer */
 void           sched_dump(void);            /* commande shell `ps` */
+/* Copie un instantane de tous les threads (IRQ coupees) dans out, retourne le
+ * nombre copie. Sert au gestionnaire des taches sans exposer la liste vive. */
+u32            thread_snapshot(struct thread *out, u32 max);
 
 #endif

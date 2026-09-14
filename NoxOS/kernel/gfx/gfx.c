@@ -28,6 +28,27 @@ void surface_destroy(struct surface *s)
     kfree(s);
 }
 
+struct surface *surface_from_nxi(const void *data, u32 size)
+{
+    const u32 *hdr = data;
+    if (!data || size < 16 || hdr[0] != NXI_MAGIC || hdr[3] != 16)
+        return NULL;
+    u32 w = hdr[1], h = hdr[2];
+    if (w == 0 || h == 0 || w > 4096 || h > 4096 || size < 16 + w * h * 2)
+        return NULL;
+    struct surface *s = surface_create((int)w, (int)h);
+    if (!s)
+        return NULL;
+    const u16 *px = (const u16 *)((const u8 *)data + 16);
+    u32 n = w * h;
+    for (u32 i = 0; i < n; i++) {
+        u16 p = px[i];
+        u32 r = (p >> 11) & 0x1F, g = (p >> 5) & 0x3F, b = p & 0x1F;
+        s->pixels[i] = RGB((r << 3) | (r >> 2), (g << 2) | (g >> 4), (b << 3) | (b >> 2));
+    }
+    return s;
+}
+
 static inline bool clip(const struct surface *s, struct rect *r)
 {
     struct rect bounds = { 0, 0, s->w, s->h };

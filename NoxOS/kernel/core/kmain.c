@@ -28,8 +28,10 @@
 #include <nox/ata.h>
 #include <nox/fs.h>
 #include <nox/keyboard.h>
+#include <nox/mouse.h>
 #include <nox/cpu.h>
 #include <nox/shell.h>
+#include <nox/desktop.h>
 #include <nox/io.h>
 
 extern u8 _kernel_start[];
@@ -98,6 +100,14 @@ void kmain(u32 magic, const struct boot_info *info)
     step("keyboard");
     keyboard_init();
 
+    if (fb_active()) {
+        step("mouse");
+        if (mouse_init(fb_width(), fb_height()))
+            kprintf("       ps/2 mouse ready\n");
+        else
+            kprintf("       no ps/2 mouse\n");
+    }
+
     step("disk");
     if (ata_init()) {
         kprintf("       ata0: %s, %u MB\n", ata_model(), ata_sector_count() / 2048);
@@ -123,6 +133,12 @@ void kmain(u32 magic, const struct boot_info *info)
     console_set_color(VGA_LIGHT_GREEN, VGA_BLACK);
     kprintf("\nSystem initialized successfully.\n\n");
     console_set_color(VGA_LIGHT_GREY, VGA_BLACK);
+
+    if (fb_active()) {
+        step("desktop");
+        if (desktop_start())
+            kprintf("       Nox Desktop started\n");
+    }
 
     shell_run();
 }

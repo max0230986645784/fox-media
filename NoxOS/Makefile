@@ -44,6 +44,7 @@ KERNEL_C   := $(wildcard $(KERNEL_DIR)/core/*.c) \
               $(wildcard $(KERNEL_DIR)/proc/*.c) \
               $(wildcard $(KERNEL_DIR)/fs/*.c) \
               $(wildcard $(KERNEL_DIR)/gfx/*.c) \
+              $(wildcard $(KERNEL_DIR)/desktop/*.c) \
               $(wildcard $(KERNEL_DIR)/lib/*.c)
 
 KERNEL_OBJ := $(patsubst %.asm,$(BUILD)/%.o,$(KERNEL_ASM)) \
@@ -65,7 +66,7 @@ MKNOXFS    := $(BUILD)/mknoxfs
 ROOTFS_SRC := rootfs
 ROOTFS     := $(BUILD)/rootfs
 FS_IMAGE   := $(BUILD)/noxfs.img
-FS_BLOCKS  := 1024                     # 4 Mo
+FS_BLOCKS  := 4096                     # 16 Mo
 BOOT_AREA  := 1048576                  # 1 Mo reserve avant NoxFS (LBA 2048)
 
 .PHONY: all run run-serial test clean size

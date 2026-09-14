@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Genere kernel/gfx/font8x16.c : police bitmap 8x16, glyphes 32..126 + 0
+"""Genere kernel/gfx/font8x16.c : police bitmap 8x16, glyphes ASCII 32..126 et Latin-1 160..255
 (case vide), rendue depuis une police monospace TrueType de la machine hote.
 
     python3 tools/genfont.py /usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf
@@ -19,7 +19,7 @@ out = ["/* NoxOS - police bitmap 8x16 (generee par tools/genfont.py, ne pas edit
        "const u8 font8x16[256][16] = {"]
 for code in range(256):
     rows = [0] * H
-    if 32 <= code < 127:
+    if 32 <= code < 127 or 160 <= code < 256:
         img = Image.new("L", (W, H), 0)
         d = ImageDraw.Draw(img)
         d.text((0, -1), chr(code), font=font, fill=255)

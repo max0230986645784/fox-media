@@ -45,6 +45,11 @@ static inline bool rect_contains(struct rect r, int x, int y)
 struct surface *surface_create(int w, int h);          /* kmalloc, pixels a 0 */
 void            surface_destroy(struct surface *s);
 
+/* Image NoxOS .nxi (voir tools/img2nxi.py) : en-tete 16 octets + RGB565.
+ * Renvoie une surface 32 bpp ou NULL si le format est invalide. */
+#define NXI_MAGIC 0x4D49584Eu
+struct surface *surface_from_nxi(const void *data, u32 size);
+
 void gfx_fill(struct surface *s, struct rect r, u32 color);
 /* Remplissage avec alpha (color & 0xFF000000 = opacite) */
 void gfx_fill_alpha(struct surface *s, struct rect r, u32 color);
