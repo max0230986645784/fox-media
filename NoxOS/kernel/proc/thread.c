@@ -16,6 +16,9 @@
 #include <nox/string.h>
 #include <nox/timer.h>
 #include <nox/io.h>
+#include <nox/gdt.h>
+#include <nox/paging.h>
+#include <nox/process.h>
 
 extern void switch_context(struct thread *prev, struct thread *next);
 
@@ -108,6 +111,10 @@ static void schedule(void)
         prev->state = THREAD_READY;
     next->state = THREAD_RUNNING;
     current = next;
+    /* Pile kernel utilisee par le CPU quand `next` (en ring 3) sera
+     * interrompu, et espace d'adressage de son processus. */
+    tss_set_kernel_stack(next->kstack_top);
+    paging_switch(next->proc ? next->proc->page_dir : paging_kernel_directory());
     switch_context(prev, next);
 }
 
@@ -130,6 +137,7 @@ struct thread *thread_create(const char *name, thread_fn fn, void *arg)
     struct thread *t = kmalloc(sizeof(*t));
     memset(t, 0, sizeof(*t));
     t->stack = kmalloc(THREAD_STACK_SIZE);
+    t->kstack_top = (u32)(t->stack + THREAD_STACK_SIZE);
     t->entry = fn;
     t->arg   = arg;
     t->state = THREAD_READY;
@@ -171,6 +179,9 @@ void thread_yield(void)
 
 void thread_sleep_ms(u32 ms)
 {
+    /* borne : au-dela de ~24 jours on plafonne (evite le debordement 32 bits) */
+    if (ms > 0x7FFFFFFFu / TIMER_HZ)
+        ms = 0x7FFFFFFFu / TIMER_HZ;
     u32 ticks = (ms * TIMER_HZ + 999) / 1000;
     u32 flags = irq_save();
     current->wake_tick = timer_ticks() + (ticks ? ticks : 1);
@@ -206,15 +217,30 @@ void sched_tick(void)
         schedule();
 }
 
+u32 thread_snapshot(struct thread *out, u32 max)
+{
+    u32 flags = irq_save();
+    u32 n = 0;
+    struct thread *t = current;
+    do {
+        if (n < max)
+            out[n++] = *t;
+        t = t->next;
+    } while (t != current);
+    irq_restore(flags);
+    return n;
+}
+
 void sched_dump(void)
 {
     static const char *state_names[] = { "ready", "running", "sleeping", "zombie" };
     u32 flags = irq_save();
-    kprintf("  ID  STATE     CPU(ms)  NAME\n");
+    kprintf("  ID  STATE     CPU(ms)  RING PID  NAME\n");
     struct thread *t = current;
     do {
-        kprintf("  %-3u %-9s %-8u %s\n", t->id, state_names[t->state],
-                t->run_ticks * (1000 / TIMER_HZ), t->name);
+        kprintf("  %-3u %-9s %-8u %-4u %-4u %s\n", t->id, state_names[t->state],
+                t->run_ticks * (1000 / TIMER_HZ), t->proc ? 3 : 0,
+                t->proc ? t->proc->pid : 0, t->name);
         t = t->next;
     } while (t != current);
     irq_restore(flags);

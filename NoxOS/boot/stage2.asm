@@ -6,16 +6,23 @@
 ;    1. recuperer la carte memoire physique via BIOS E820 -> boot info (0x9000)
 ;    2. charger le kernel (LBA 1+STAGE2_SECTORS, KERNEL_SECTORS secteurs)
 ;       a l'adresse physique 0x10000 via INT 13h etendu (AH=42h)
-;    3. activer la ligne A20
-;    4. charger une GDT plate et passer en mode protege 32 bits
-;    5. sauter dans le kernel avec :  EAX = NOX_BOOT_MAGIC, EBX = &boot_info
+;    3. passer en mode graphique VBE (1024x768x32 lineaire, sinon 800x600,
+;       sinon rester en texte : fb_addr = 0)
+;    4. activer la ligne A20
+;    5. charger une GDT plate et passer en mode protege 32 bits
+;    6. sauter dans le kernel avec :  EAX = NOX_BOOT_MAGIC, EBX = &boot_info
 ;
 ;  Layout de boot_info (a 0x9000), lu par kernel/memory.c :
-;    u32 e820_count
-;    u32 boot_drive
-;    u32 kernel_sectors
-;    u32 reserved
-;    e820_entry entries[]   (24 octets chacune, a partir de 0x9010)
+;    u32 e820_count           +0
+;    u32 boot_drive           +4
+;    u32 kernel_sectors       +8
+;    u32 fb_addr              +12   adresse physique du framebuffer (0 = texte)
+;    u32 fb_width             +16
+;    u32 fb_height            +20
+;    u32 fb_pitch             +24   octets par ligne
+;    u32 fb_bpp               +28
+;    u32 pad[4]               +32
+;    e820_entry entries[]     +48   (24 octets chacune)
 ; =============================================================================
 
 %ifndef STAGE2_SECTORS
@@ -32,7 +39,10 @@ KERNEL_LBA        equ 1 + STAGE2_SECTORS
 KERNEL_LOAD_SEG   equ 0x1000              ; 0x1000:0x0000 = 0x10000 physique
 KERNEL_ENTRY      equ 0x10000
 BOOT_INFO         equ 0x9000
-E820_ENTRIES      equ BOOT_INFO + 16
+E820_ENTRIES      equ BOOT_INFO + 48
+VBE_INFO          equ 0x8A00              ; VbeInfoBlock (512 octets)
+VBE_MODE_INFO     equ 0x8C00              ; ModeInfoBlock (256 octets)
+VBE_MAX_W         equ 1920                ; largeur maximale retenue (1080p)
 NOX_BOOT_MAGIC    equ 0x4E4F5831          ; "NOX1"
 SECTORS_PER_READ  equ 32                  ; 16 Ko par appel BIOS
 
@@ -63,7 +73,12 @@ stage2_start:
     jc disk_error
 
     ; ------------------------------------------------------------------
-    ; 3. Ligne A20 (permet d'adresser au-dela de 1 Mo)
+    ; 3. Mode graphique VBE (apres les messages texte, avant le mode protege)
+    ; ------------------------------------------------------------------
+    call set_video_mode
+
+    ; ------------------------------------------------------------------
+    ; 3b. Ligne A20 (permet d'adresser au-dela de 1 Mo)
     ; ------------------------------------------------------------------
     in al, 0x92
     or al, 0x02
@@ -135,6 +150,10 @@ detect_memory:
     mov [BOOT_INFO + 4], eax
     mov dword [BOOT_INFO + 8], KERNEL_SECTORS
     mov dword [BOOT_INFO + 12], 0
+    mov dword [BOOT_INFO + 16], 0
+    mov dword [BOOT_INFO + 20], 0
+    mov dword [BOOT_INFO + 24], 0
+    mov dword [BOOT_INFO + 28], 0
     pop es
     clc
     ret
@@ -196,6 +215,114 @@ disk_error:
     hlt
     jmp .hang
 
+; -----------------------------------------------------------------------------
+; set_video_mode : cherche dans la liste VBE le plus grand mode lineaire
+;   32 bpp de largeur <= VBE_MAX_W (1920x1080 vise ; 16:9 prefere a largeur
+;   egale) et l'active. Remplit boot_info.fb_*.
+;   En cas d'echec, fb_addr reste 0 et le kernel garde la console texte.
+; -----------------------------------------------------------------------------
+set_video_mode:
+    push es
+    xor ax, ax
+    mov es, ax
+    mov di, VBE_INFO
+    mov dword [es:di], 0x32454256       ; "VBE2" : demande les infos etendues
+    mov ax, 0x4F00
+    int 0x10
+    cmp ax, 0x004F
+    jne .fail
+    cmp dword [es:di], 0x41534556       ; "VESA"
+    jne .fail
+
+    ; liste des modes : pointeur far a VBE_INFO+14
+    mov si, [VBE_INFO + 14]
+    mov ax, [VBE_INFO + 16]
+    mov fs, ax                          ; fs:si = liste (terminee par 0xFFFF)
+    mov word [best_mode], 0
+    mov word [best_w], 0
+    mov word [best_h], 0
+.next:
+    mov cx, [fs:si]
+    add si, 2
+    cmp cx, 0xFFFF
+    je .choose
+    push cx
+    mov ax, 0x4F01
+    mov di, VBE_MODE_INFO
+    int 0x10
+    pop cx
+    cmp ax, 0x004F
+    jne .next
+    mov ax, [VBE_MODE_INFO + 0]         ; attributs
+    and ax, 0x0099                      ; supporte | couleur | graphique | LFB
+    cmp ax, 0x0099
+    jne .next
+    cmp byte [VBE_MODE_INFO + 25], 32   ; bpp
+    jne .next
+    cmp byte [VBE_MODE_INFO + 27], 6    ; modele memoire : direct color
+    jne .next
+    mov ax, [VBE_MODE_INFO + 18]        ; largeur
+    mov bx, [VBE_MODE_INFO + 20]        ; hauteur
+    cmp ax, VBE_MAX_W
+    ja .next
+    cmp ax, 640
+    jb .next
+    cmp ax, [best_w]
+    ja .take                            ; plus large : on prend
+    jne .next
+    ; meme largeur : on prefere le 16:9 (h*16 == w*9)
+    push dx
+    push ax
+    mov dx, bx
+    shl dx, 4                           ; h*16
+    mov ax, [VBE_MODE_INFO + 18]
+    imul ax, ax, 9                      ; w*9
+    cmp ax, dx
+    pop ax
+    pop dx
+    jne .next
+.take:
+    mov [best_mode], cx
+    mov [best_w], ax
+    mov [best_h], bx
+    jmp .next
+.choose:
+    mov cx, [best_mode]
+    test cx, cx
+    jz .fail
+    mov ax, 0x4F01                      ; relit les infos du mode retenu
+    mov di, VBE_MODE_INFO
+    int 0x10
+    cmp ax, 0x004F
+    jne .fail
+    mov ax, 0x4F02
+    mov bx, cx
+    or bx, 0x4000                       ; bit 14 = framebuffer lineaire
+    int 0x10
+    cmp ax, 0x004F
+    jne .fail
+    mov eax, [VBE_MODE_INFO + 40]       ; PhysBasePtr
+    mov [BOOT_INFO + 12], eax
+    movzx eax, word [VBE_MODE_INFO + 18]
+    mov [BOOT_INFO + 16], eax
+    movzx eax, word [VBE_MODE_INFO + 20]
+    mov [BOOT_INFO + 20], eax
+    movzx eax, word [VBE_MODE_INFO + 16] ; BytesPerScanLine
+    mov [BOOT_INFO + 24], eax
+    movzx eax, byte [VBE_MODE_INFO + 25]
+    mov [BOOT_INFO + 28], eax
+    pop es
+    ret
+.fail:
+    mov si, msg_vbe_fail
+    call print
+    pop es
+    ret
+
+best_mode dw 0
+best_w    dw 0
+best_h    dw 0
+
 print:
     pusha
     mov ah, 0x0E
@@ -253,6 +380,7 @@ msg_loading     db "Loading kernel", 0
 msg_pmode       db "Entering protected mode...", 13, 10, 0
 msg_e820_fail   db "WARN: E820 memory map unavailable", 13, 10, 0
 msg_disk_error  db "ERR: kernel read failed", 13, 10, 0
+msg_vbe_fail    db "WARN: no VBE 32bpp mode, staying in text mode", 13, 10, 0
 msg_crlf        db 13, 10, 0
 
 ; =============================================================================

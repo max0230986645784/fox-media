@@ -9,6 +9,8 @@
 #include <nox/pic.h>
 #include <nox/printk.h>
 #include <nox/string.h>
+#include <nox/syscall.h>
+#include <nox/process.h>
 
 struct idt_entry {
     u16 base_low;
@@ -53,6 +55,7 @@ DECL_ISR(30) DECL_ISR(31)
 DECL_IRQ(0)  DECL_IRQ(1)  DECL_IRQ(2)  DECL_IRQ(3)  DECL_IRQ(4)  DECL_IRQ(5)
 DECL_IRQ(6)  DECL_IRQ(7)  DECL_IRQ(8)  DECL_IRQ(9)  DECL_IRQ(10) DECL_IRQ(11)
 DECL_IRQ(12) DECL_IRQ(13) DECL_IRQ(14) DECL_IRQ(15)
+DECL_ISR(128)
 
 extern void idt_flush(u32 idt_ptr_addr);
 
@@ -87,6 +90,8 @@ void idt_init(void)
         idt_set(i, isrs[i], GDT_KERNEL_CODE, 0x8E);
     for (u8 i = 0; i < 16; i++)
         idt_set((u8)(IRQ_BASE + i), irqs[i], GDT_KERNEL_CODE, 0x8E);
+    /* 0xEE = present, DPL 3 (appelable depuis le ring 3), porte d'interruption */
+    idt_set(SYSCALL_VECTOR, isr128, GDT_KERNEL_CODE, 0xEE);
 
     idt_pointer.limit = sizeof(idt) - 1;
     idt_pointer.base  = (u32)&idt;
@@ -112,11 +117,18 @@ void isr_register_exception_handler(u8 vector, irq_handler_t handler)
  * reentrance. */
 void isr_dispatch(struct registers *regs)
 {
+    if (regs->int_no == SYSCALL_VECTOR) {
+        syscall_dispatch(regs);
+        return;
+    }
+
     if (regs->int_no < 32) {
         if (exception_handlers[regs->int_no]) {
             exception_handlers[regs->int_no](regs);
             return;
         }
+        if ((regs->cs & 3) == 3)
+            process_fault(regs, exception_names[regs->int_no]);
         panic("%s (int %u, err=0x%x) at eip=0x%x",
               exception_names[regs->int_no], regs->int_no,
               regs->err_code, regs->eip);

@@ -71,6 +71,13 @@ static inline u32 read_cr2(void)
     return v;
 }
 
+static inline u32 read_cr3(void)
+{
+    u32 v;
+    __asm__ volatile("mov %%cr3, %0" : "=r"(v));
+    return v;
+}
+
 static inline void write_cr3(u32 v)
 {
     __asm__ volatile("mov %0, %%cr3" : : "r"(v) : "memory");

@@ -22,11 +22,12 @@ QEMU      := qemu-system-i386
 CFLAGS    := -m32 -std=gnu11 -ffreestanding -fno-pie -fno-stack-protector \
              -fno-builtin -nostdlib -nostdinc -O2 -Wall -Wextra -Werror \
              -mno-sse -mno-mmx -mno-80387 -mgeneral-regs-only \
-             -I$(KERNEL_DIR)/include
+             -D__KERNEL__ -I$(KERNEL_DIR)/include -MMD -MP
+HOSTCC    := gcc
 LDFLAGS   := -m elf_i386 -T $(KERNEL_DIR)/linker.ld -nostdlib
 ASFLAGS32 := -f elf32
 
-STAGE2_SECTORS := 4
+STAGE2_SECTORS := 6
 
 # --- Sources kernel -----------------------------------------------------------
 # entry.o doit etre le premier objet lie : c'est l'adresse 0x10000.
@@ -34,22 +35,39 @@ KERNEL_ASM := $(KERNEL_DIR)/arch/$(ARCH)/entry.asm \
               $(KERNEL_DIR)/arch/$(ARCH)/gdt_flush.asm \
               $(KERNEL_DIR)/arch/$(ARCH)/idt_flush.asm \
               $(KERNEL_DIR)/arch/$(ARCH)/isr.asm \
-              $(KERNEL_DIR)/arch/$(ARCH)/switch.asm
+              $(KERNEL_DIR)/arch/$(ARCH)/switch.asm \
+              $(KERNEL_DIR)/arch/$(ARCH)/user_enter.asm
 KERNEL_C   := $(wildcard $(KERNEL_DIR)/core/*.c) \
               $(wildcard $(KERNEL_DIR)/arch/$(ARCH)/*.c) \
               $(wildcard $(KERNEL_DIR)/drivers/*.c) \
               $(wildcard $(KERNEL_DIR)/mm/*.c) \
               $(wildcard $(KERNEL_DIR)/proc/*.c) \
+              $(wildcard $(KERNEL_DIR)/fs/*.c) \
+              $(wildcard $(KERNEL_DIR)/gfx/*.c) \
+              $(wildcard $(KERNEL_DIR)/desktop/*.c) \
               $(wildcard $(KERNEL_DIR)/lib/*.c)
 
 KERNEL_OBJ := $(patsubst %.asm,$(BUILD)/%.o,$(KERNEL_ASM)) \
               $(patsubst %.c,$(BUILD)/%.o,$(KERNEL_C))
+
+# --- Userland : libnox + programmes (binaires plats charges a 0x40000000) -----
+USER_DIR   := user
+USER_CFLAGS:= $(filter-out -D__KERNEL__,$(CFLAGS)) -I$(USER_DIR)/include
+USER_LIB   := $(BUILD)/$(USER_DIR)/lib/crt0.o $(BUILD)/$(USER_DIR)/lib/nox.o
+USER_SRC   := $(wildcard $(USER_DIR)/bin/*.c)
+USER_BIN   := $(patsubst $(USER_DIR)/bin/%.c,$(BUILD)/$(USER_DIR)/bin/%,$(USER_SRC))
 
 IMAGE      := $(BUILD)/noxos.img
 KERNEL_ELF := $(BUILD)/kernel.elf
 KERNEL_BIN := $(BUILD)/kernel.bin
 STAGE1_BIN := $(BUILD)/stage1.bin
 STAGE2_BIN := $(BUILD)/stage2.bin
+MKNOXFS    := $(BUILD)/mknoxfs
+ROOTFS_SRC := rootfs
+ROOTFS     := $(BUILD)/rootfs
+FS_IMAGE   := $(BUILD)/noxfs.img
+FS_BLOCKS  := 8192                     # 32 Mo
+BOOT_AREA  := 1048576                  # 1 Mo reserve avant NoxFS (LBA 2048)
 
 .PHONY: all run run-serial test clean size
 
@@ -71,7 +89,7 @@ $(KERNEL_BIN): $(KERNEL_ELF)
 	$(OBJCOPY) -O binary $< $@
 
 # --- Bootloader ---------------------------------------------------------------
-$(STAGE1_BIN): $(BOOT_DIR)/stage1.asm
+$(STAGE1_BIN): $(BOOT_DIR)/stage1.asm Makefile
 	@mkdir -p $(BUILD)
 	$(AS) -f bin -DSTAGE2_SECTORS=$(STAGE2_SECTORS) $< -o $@
 
@@ -81,10 +99,45 @@ $(STAGE2_BIN): $(BOOT_DIR)/stage2.asm $(KERNEL_BIN)
 	      -DKERNEL_SECTORS=$$(( ($$(stat -c %s $(KERNEL_BIN)) + 511) / 512 )) \
 	      $< -o $@
 
-# --- Image disque : [stage1][stage2][kernel] puis remplissage a 1.44 Mo -------
-$(IMAGE): $(STAGE1_BIN) $(STAGE2_BIN) $(KERNEL_BIN)
+# --- NoxFS : outil hote + image construite depuis rootfs/ --------------------
+$(MKNOXFS): tools/mknoxfs.c $(KERNEL_DIR)/include/nox/noxfs.h
+	@mkdir -p $(BUILD)
+	$(HOSTCC) -O2 -Wall -Wextra -Werror -o $@ $<
+
+$(BUILD)/$(USER_DIR)/lib/crt0.o: $(USER_DIR)/lib/crt0.asm
+	@mkdir -p $(dir $@)
+	$(AS) $(ASFLAGS32) $< -o $@
+
+$(BUILD)/$(USER_DIR)/%.o: $(USER_DIR)/%.c
+	@mkdir -p $(dir $@)
+	$(CC) $(USER_CFLAGS) -c $< -o $@
+
+# crt0.o en premier : _start doit etre au tout debut du binaire.
+$(BUILD)/$(USER_DIR)/bin/%: $(BUILD)/$(USER_DIR)/bin/%.o $(USER_LIB) $(USER_DIR)/user.ld
+	$(LD) -m elf_i386 -T $(USER_DIR)/user.ld -nostdlib -o $@.elf $(USER_LIB) $<
+	$(OBJCOPY) -O binary --set-section-flags .bss=alloc,load,contents $@.elf $@
+
+# Manifeste = liste des fichiers du rootfs + programmes : regenere a chaque
+# make, mais seulement REECRIT s'il change, pour que la suppression d'un
+# fichier declenche aussi la reconstruction de l'image.
+FS_MANIFEST := $(BUILD)/noxfs.manifest
+.PHONY: $(FS_MANIFEST).tmp
+$(FS_MANIFEST): $(FS_MANIFEST).tmp
+	@mkdir -p $(BUILD)
+	@{ find $(ROOTFS_SRC) -type f | sort; printf '%s\n' $(USER_BIN); } > $@.new
+	@if cmp -s $@.new $@; then rm -f $@.new; else mv $@.new $@; fi
+
+$(FS_IMAGE): $(MKNOXFS) $(USER_BIN) $(FS_MANIFEST) $(shell find $(ROOTFS_SRC) -type f)
+	rm -rf $(ROOTFS) && mkdir -p $(ROOTFS)/bin
+	cp -r $(ROOTFS_SRC)/. $(ROOTFS)/
+	cp $(USER_BIN) $(ROOTFS)/bin/
+	$(MKNOXFS) $@ $(FS_BLOCKS) $(ROOTFS) NoxOS
+
+# --- Image disque : [stage1][stage2][kernel] ... 1 Mo ... [NoxFS] -------------
+$(IMAGE): $(STAGE1_BIN) $(STAGE2_BIN) $(KERNEL_BIN) $(FS_IMAGE)
 	cat $(STAGE1_BIN) $(STAGE2_BIN) $(KERNEL_BIN) > $@
-	truncate -s 1474560 $@
+	truncate -s $(BOOT_AREA) $@
+	cat $(FS_IMAGE) >> $@
 	@echo "==> $(IMAGE) ready ($$(stat -c %s $(KERNEL_BIN)) bytes of kernel)"
 
 size: $(KERNEL_ELF)
@@ -104,3 +157,5 @@ test: $(IMAGE)
 
 clean:
 	rm -rf $(BUILD)
+
+-include $(KERNEL_OBJ:.o=.d)

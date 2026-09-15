@@ -13,6 +13,8 @@
 #include <nox/types.h>
 #include <nox/printk.h>
 #include <nox/vga.h>
+#include <nox/fb.h>
+#include <nox/fbcon.h>
 #include <nox/serial.h>
 #include <nox/gdt.h>
 #include <nox/idt.h>
@@ -21,10 +23,15 @@
 #include <nox/pmm.h>
 #include <nox/paging.h>
 #include <nox/thread.h>
+#include <nox/process.h>
 #include <nox/timer.h>
+#include <nox/ata.h>
+#include <nox/fs.h>
 #include <nox/keyboard.h>
+#include <nox/mouse.h>
 #include <nox/cpu.h>
 #include <nox/shell.h>
+#include <nox/desktop.h>
 #include <nox/io.h>
 
 extern u8 _kernel_start[];
@@ -32,11 +39,11 @@ extern u8 _kernel_end[];
 
 static void print_banner(void)
 {
-    vga_set_color(VGA_LIGHT_CYAN, VGA_BLACK);
+    console_set_color(VGA_LIGHT_CYAN, VGA_BLACK);
     kprintf("\n  %s v%s\n", KERNEL_NAME, KERNEL_VERSION);
-    vga_set_color(VGA_DARK_GREY, VGA_BLACK);
+    console_set_color(VGA_DARK_GREY, VGA_BLACK);
     kprintf("  NoxOS - Built from scratch.\n\n");
-    vga_set_color(VGA_LIGHT_GREY, VGA_BLACK);
+    console_set_color(VGA_LIGHT_GREY, VGA_BLACK);
 }
 
 static void step(const char *what)
@@ -47,7 +54,10 @@ static void step(const char *what)
 void kmain(u32 magic, const struct boot_info *info)
 {
     serial_init();
-    vga_init();
+    if (magic == NOX_BOOT_MAGIC && fb_init(info))
+        fbcon_init();
+    else
+        vga_init();
     print_banner();
 
     if (magic != NOX_BOOT_MAGIC)
@@ -74,6 +84,11 @@ void kmain(u32 magic, const struct boot_info *info)
     step("paging");
     paging_init();
     kprintf("       identity map 0 - 0x%x, %u page tables\n", pmm_ram_top(), paging_table_count());
+    if (fb_active())
+        kprintf("       framebuffer %dx%d @ 0x%x (%u KB mapped)\n",
+                fb_width(), fb_height(), fb_phys(), fb_size() / 1024);
+    else
+        kprintf("       no VBE framebuffer, VGA text console\n");
 
     step("heap");
     heap_init();
@@ -85,8 +100,29 @@ void kmain(u32 magic, const struct boot_info *info)
     step("keyboard");
     keyboard_init();
 
+    if (fb_active()) {
+        step("mouse");
+        if (mouse_init(fb_width(), fb_height()))
+            kprintf("       ps/2 mouse ready\n");
+        else
+            kprintf("       no ps/2 mouse\n");
+    }
+
+    step("disk");
+    if (ata_init()) {
+        kprintf("       ata0: %s, %u MB\n", ata_model(), ata_sector_count() / 2048);
+        if (fs_init())
+            kprintf("       noxfs: '%s' mounted, %u/%u blocks used\n",
+                    fs_super()->label, fs_used_blocks(), fs_super()->total_blocks);
+        else
+            kprintf("       noxfs: no valid volume at LBA %u\n", NOXFS_DISK_LBA);
+    } else {
+        kprintf("       no ATA disk\n");
+    }
+
     step("scheduler");
     sched_init();
+    process_init();
 
     sti();
 
@@ -94,9 +130,15 @@ void kmain(u32 magic, const struct boot_info *info)
     cpu_detect(&cpu);
     kprintf("       cpu: %s\n", cpu.brand);
 
-    vga_set_color(VGA_LIGHT_GREEN, VGA_BLACK);
+    console_set_color(VGA_LIGHT_GREEN, VGA_BLACK);
     kprintf("\nSystem initialized successfully.\n\n");
-    vga_set_color(VGA_LIGHT_GREY, VGA_BLACK);
+    console_set_color(VGA_LIGHT_GREY, VGA_BLACK);
+
+    if (fb_active()) {
+        step("desktop");
+        if (desktop_start())
+            kprintf("       Nox Desktop started\n");
+    }
 
     shell_run();
 }
