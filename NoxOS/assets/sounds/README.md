@@ -7,8 +7,12 @@ Sons fournis par l'auteur (ne pas regenerer) :
 | `boot.mp3` | demarrage de NoxOS |
 | `error.mp3` | erreur (boite de dialogue, action refusee) |
 
-Sons synthetises (`python3 tools/mksounds.py assets/sounds`), tous en Re mineur
-pour une identite sonore commune :
+Autres sons : banques libres de droits, telecharges et normalises (-16 LUFS)
+par `python3 tools/fetchsounds.py assets/sounds` (la source exacte de chaque
+son est listee dans ce script) :
+
+- Mixkit - licence Mixkit (usage libre, y compris commercial) : https://mixkit.co/license/
+- Kenney "Interface Sounds" - CC0 : https://kenney.nl/assets/interface-sounds
 
 | Fichier | Evenement |
 |---|---|

@@ -35,11 +35,17 @@ Chaque version doit **fonctionner et être testée** avant la suivante.
       identity-mappé en bas, le userland est à 0x40000000-0x80000000)
 - [ ] séparation SYSTEM / USER, comptes, permissions → v0.6
 
-## v0.4 — Graphique
+## v0.4 — Graphique (Nox Aurora)
 
-- [ ] mode vidéo VESA/VBE (framebuffer)
-- [ ] souris PS/2
-- [ ] gestionnaire de fenêtres Nox Desktop (bureau, barre des tâches, menu Nox)
+- [x] mode vidéo VESA/VBE (framebuffer, 1920×1080 minimum)
+- [x] souris PS/2
+- [x] gestionnaire de fenêtres Nox Desktop (bureau, barre flottante en bas, recherche)
+- [x] banque de sons système (`assets/sounds/`, boot/erreur fournis par l'auteur)
+- [ ] menu Nox (clic sur le logo) façon Windows 11 : recherche en haut,
+      colonne « Récent », « Recherches rapides » (paramètres), grille d'applications
+- [ ] animations de fenêtres : ouverture/fermeture par dissolution en points
+      puis léger « swell » (gonflement élastique) — référence vidéo fournie
+- [ ] son batterie faible / secteur : uniquement si une batterie est détectée (portables)
 
 Direction visuelle décidée : un mélange **Windows / macOS**. La maquette
 fournie par le propriétaire du projet sert de modèle pour la barre des tâches
@@ -65,3 +71,18 @@ Ces règles se concrétiseront dans la pile réseau et la couche sécurité
 
 Voir le cahier des charges : explorateur, terminal complet, réseau,
 gestionnaire de paquets, Nox Studio, SDK, installation, stabilisation.
+
+## Éditions (noms publics)
+
+| Édition | Contenu |
+|---|---|
+| Nox Genesis | boot, noyau, disque, processus (v0.1–v0.3) |
+| Nox Aurora | premier bureau graphique (v0.4) |
+| Nox Nova | explorateur, applications, gestionnaire des tâches |
+| Nox Guardian | comptes, permissions, écriture disque |
+| Nox Beta | réseau, Internet, connexion Discord (QR code) |
+| Nox Ultimate | avant-dernière : stabilisation, installation, **clé USB bootable** |
+| Nox OS | version finale publique |
+
+Clé USB : `build/noxos.img` est déjà une image disque brute (MBR) ; l'écriture
+sur clé (`dd` / Rufus) et l'installateur seront finalisés pour Nox Ultimate.
