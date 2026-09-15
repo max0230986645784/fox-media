@@ -7,12 +7,10 @@ Sons fournis par l'auteur (ne pas regenerer) :
 | `boot.mp3` | demarrage de NoxOS |
 | `error.mp3` | erreur (boite de dialogue, action refusee) |
 
-Autres sons : banques libres de droits, telecharges et normalises (-16 LUFS)
-par `python3 tools/fetchsounds.py assets/sounds` (la source exacte de chaque
-son est listee dans ce script) :
-
-- Mixkit - licence Mixkit (usage libre, y compris commercial) : https://mixkit.co/license/
-- Kenney "Interface Sounds" - CC0 : https://kenney.nl/assets/interface-sounds
+Autres sons : theme sonore **Ocean** de KDE Plasma (Guilherme Marcal Silva,
+licence CC-BY-SA-4.0, https://invent.kde.org/plasma/ocean-sound-theme),
+convertis et normalises (-16 LUFS) par `python3 tools/fetchsounds.py assets/sounds`
+(la correspondance evenement -> fichier Ocean est dans ce script).
 
 | Fichier | Evenement |
 |---|---|
