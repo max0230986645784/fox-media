@@ -6,6 +6,7 @@ Sons fournis par l'auteur (ne pas regenerer) :
 |---|---|
 | `boot.mp3` | demarrage de NoxOS |
 | `error.mp3` | erreur (boite de dialogue, action refusee) |
+| `notification.mp3` | notification generale (LaSonotheque.fr, "COMCell Message 1", ID 1111) |
 
 Autres sons : theme sonore **Ocean** de KDE Plasma (Guilherme Marcal Silva,
 licence CC-BY-SA-4.0, https://invent.kde.org/plasma/ocean-sound-theme),
@@ -18,7 +19,6 @@ convertis et normalises (-16 LUFS) par `python3 tools/fetchsounds.py assets/soun
 | `login.mp3` | ouverture de session |
 | `logout.mp3` | fermeture de session |
 | `lock.mp3` / `unlock.mp3` | verrouillage / deverrouillage |
-| `notification.mp3` | notification generale |
 | `message.mp3` | nouveau message (Nox Connect, Noxia) |
 | `warning.mp3` | avertissement |
 | `critical.mp3` | arret critique (panique noyau, disque) |

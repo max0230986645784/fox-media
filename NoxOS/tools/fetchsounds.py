@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Build the NoxOS system sound bank.
 
-boot.mp3 and error.mp3 are provided by the NoxOS author and are never touched.
+boot.mp3, error.mp3 and notification.mp3 are provided by the NoxOS author and are never touched.
 Every other sound comes from the KDE Plasma "Ocean" sound theme
 (https://invent.kde.org/plasma/ocean-sound-theme, CC-BY-SA-4.0,
 Guilherme Marcal Silva), a professionally designed desktop-OS sound set.
@@ -14,14 +14,14 @@ import sys
 import tempfile
 
 REPO = "https://invent.kde.org/plasma/ocean-sound-theme.git"
-PROTECTED = {"boot.mp3", "error.mp3"}
+PROTECTED = {"boot.mp3", "error.mp3", "notification.mp3"}
 
 # NoxOS event -> Ocean stereo file
 SOUNDS = {
     "shutdown":          "desktop-logout.oga",
     "login":             "desktop-login.oga",
     "logout":            "service-logout.oga",
-    "notification":      "dialog-information.oga",
+    # notification.mp3: LaSonotheque.fr "COMCell Message 1" (ID 1111), provided by the author
     "message":           "message-new-instant.oga",
     "warning":           "dialog-warning.oga",
     "critical":          "dialog-error-critical.oga",
