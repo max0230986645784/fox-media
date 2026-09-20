@@ -63,11 +63,15 @@ serial_send() {
     serial_send "run privileged"
     serial_send "procs"
     serial_send "frames"
+    serial_send "play error"
+    sleep 2.5
+    serial_send "play nothing.wav"
+    serial_send "ps"
     exec 3>&-
     echo "quit"
 ) | timeout 40 "$QEMU" \
     -drive file="$IMAGE",format=raw,if=ide -m 64M -no-reboot \
-    -display none -monitor stdio \
+    -display none -monitor stdio -audiodev none,id=snd0 -device AC97,audiodev=snd0 \
     -chardev socket,id=ser0,host=127.0.0.1,port="$PORT",server=on,wait=off,logfile="$LOG" \
     -serial chardev:ser0 >/dev/null 2>&1
 
@@ -93,10 +97,10 @@ check "Total usable :"                     "'memory' command works"
 check "[init] paging"                      "paging enabled at boot"
 check "Frames (4 KB):"                     "physical frame allocator reports stats"
 check "heap test ok"                       "kmalloc/kfree/aligned + integrity check"
-check "spawned thread 6 'demo-02'"         "3 kernel threads created"
+check "spawned thread 7 'demo-02'"         "3 kernel threads created"
 check "[demo-00] step 1/3"                 "thread demo-00 ran (preempted shell)"
 check "[demo-02] finished"                 "threads sleep/wake and exit"
-check "3 threads:"                         "finished threads were reaped (ps, main+idle+desktop)"
+check "4 threads:"                         "finished threads were reaped (ps, main+idle+desktop+audio)"
 check "main"                               "'ps' lists the main thread"
 check "ata0: QEMU HARDDISK"                "ATA PIO disk detected"
 check "noxfs: 'NoxOS' mounted"             "NoxFS volume mounted at boot"
@@ -110,6 +114,10 @@ check "Page fault in pid 2 (crash)"        "page fault in ring 3 kills only the 
 check "[pid 2 exited with code -1]"        "crashed process reaped, shell alive"
 check "General protection fault in pid 3"  "privileged instruction in ring 3 -> GPF -> killed"
 check "0 running process(es):"             "all processes terminated (procs)"
+check "AC'97 pci 8086:2415 ready"          "PCI scan + AC'97 audio controller initialized"
+check "playing on AC'97"                   "'play error' loads WAV from NoxFS and starts DMA"
+check "play: cannot play 'nothing.wav'"    "missing sound file rejected cleanly"
+check "audio"                              "audio thread alive after playback (ps)"
 
 # Fuite memoire : 'frames' avant et apres deux processus tues doit donner
 # exactement la meme ligne (pages, tables et repertoire rendus au PMM).

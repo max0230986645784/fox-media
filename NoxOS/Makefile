@@ -124,13 +124,23 @@ FS_MANIFEST := $(BUILD)/noxfs.manifest
 .PHONY: $(FS_MANIFEST).tmp
 $(FS_MANIFEST): $(FS_MANIFEST).tmp
 	@mkdir -p $(BUILD)
-	@{ find $(ROOTFS_SRC) -type f | sort; printf '%s\n' $(USER_BIN); } > $@.new
+	@{ find $(ROOTFS_SRC) -type f | sort; printf '%s\n' $(USER_BIN) $(SOUND_WAV); } > $@.new
 	@if cmp -s $@.new $@; then rm -f $@.new; else mv $@.new $@; fi
 
-$(FS_IMAGE): $(MKNOXFS) $(USER_BIN) $(FS_MANIFEST) $(shell find $(ROOTFS_SRC) -type f)
-	rm -rf $(ROOTFS) && mkdir -p $(ROOTFS)/bin
+# Sons systeme : les MP3 de assets/sounds sont convertis en WAV PCM 16 bits
+# stereo 48 kHz (le seul format que le pilote AC'97 du noyau lit).
+SOUND_NAMES := boot error notification
+SOUND_WAV   := $(patsubst %,$(BUILD)/sounds/%.wav,$(SOUND_NAMES))
+
+$(BUILD)/sounds/%.wav: assets/sounds/%.mp3
+	@mkdir -p $(dir $@)
+	ffmpeg -v error -y -i $< -ac 2 -ar 48000 -sample_fmt s16 -f wav $@
+
+$(FS_IMAGE): $(MKNOXFS) $(USER_BIN) $(FS_MANIFEST) $(SOUND_WAV) $(shell find $(ROOTFS_SRC) -type f)
+	rm -rf $(ROOTFS) && mkdir -p $(ROOTFS)/bin $(ROOTFS)/sys/sounds
 	cp -r $(ROOTFS_SRC)/. $(ROOTFS)/
 	cp $(USER_BIN) $(ROOTFS)/bin/
+	cp $(SOUND_WAV) $(ROOTFS)/sys/sounds/
 	$(MKNOXFS) $@ $(FS_BLOCKS) $(ROOTFS) NoxOS
 
 # --- Image disque : [stage1][stage2][kernel] ... 1 Mo ... [NoxFS] -------------
@@ -144,7 +154,8 @@ size: $(KERNEL_ELF)
 	size $(KERNEL_ELF)
 
 # --- QEMU ---------------------------------------------------------------------
-QEMU_FLAGS := -drive file=$(IMAGE),format=raw,if=ide -m 64M -no-reboot
+QEMU_AUDIO ?= -audiodev pa,id=snd0 -device AC97,audiodev=snd0
+QEMU_FLAGS := -drive file=$(IMAGE),format=raw,if=ide -m 64M -no-reboot $(QEMU_AUDIO)
 
 run: $(IMAGE)
 	$(QEMU) $(QEMU_FLAGS) -serial stdio

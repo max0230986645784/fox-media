@@ -26,12 +26,13 @@
 #include <nox/printk.h>
 #include <nox/string.h>
 #include <nox/io.h>
+#include <nox/audio.h>
 
 #define TASKBAR_H     64
 #define DOCK_H        56
 #define DOCK_ICON     40
 #define DOCK_PAD      8
-#define MENU_W        300
+#define MENU_W        720
 #define SEARCH_W      320
 #define SEARCH_MAX    48
 #define SEARCH_ROWS   8
@@ -69,6 +70,16 @@ struct search_result { enum app_icon icon; const char *label; char path[96]; int
 static struct search_result search_results[SEARCH_ROWS];
 static int  search_count;
 static struct rect search_panel;
+static void recent_push(int action);
+
+/* notification + boite d'erreur */
+#define TOAST_MS   6000
+#define MSG_MAX    96
+static char toast_title[MSG_MAX], toast_text[MSG_MAX];
+static u32  toast_until;                    /* tick d'expiration, 0 = aucune */
+static char err_title[MSG_MAX], err_text[MSG_MAX];
+static bool err_open;
+static struct rect err_ok_rect;
 
 /* --------------------------------------------------------------------------
  * Fenetres
@@ -583,13 +594,16 @@ static void search_open_result(const struct search_result *r)
         const struct noxfs_entry *e = fs_entry(r->fs_idx);
         if (e && e->type == NOXFS_DIR) app_open_explorer(r->path);
         else app_open_text(r->path);
-    } else switch (r->action) {
+    } else {
+        recent_push(r->action);
+        switch (r->action) {
         case 1: app_open_explorer(NULL); break;
         case 2: app_open_terminal(); break;
         case 3: app_open_settings(); break;
         case 4: app_open_taskmgr(); break;
         case 5: app_open_about(); break;
         default: break;
+        }
     }
     need_redraw = true;
 }
@@ -644,53 +658,170 @@ static void search_key(char c)
     need_redraw = true;
 }
 
+/* --------------------------------------------------------------------------
+ * Menu Nox (clic sur le logo) : grand panneau facon Windows 11.
+ *   recherche en haut | Recent (gauche) | Recherches rapides + Applications Nox
+ *   (droite) | alimentation en bas. Taper au clavier bascule sur la recherche.
+ * ------------------------------------------------------------------------ */
 struct menu_item { enum str_id label; enum app_icon icon; int action; };
-static const struct menu_item menu_items[] = {
+static const struct menu_item menu_apps[] = {
     { STR_EXPLORER, ICON_EXPLORER, 1 }, { STR_TERMINAL, ICON_TERMINAL, 2 },
     { STR_SETTINGS, ICON_SETTINGS, 3 }, { STR_TASKMGR, ICON_TASKMGR, 4 },
     { STR_ABOUT, ICON_INFO, 5 },
-    { STR_REBOOT, ICON_POWER, 6 }, { STR_SHUTDOWN, ICON_POWER, 7 },
 };
-#define MENU_ITEMS ((int)(sizeof(menu_items) / sizeof(menu_items[0])))
-#define MENU_ROW   40
+static const struct menu_item menu_quick[] = {
+    { STR_WALLPAPER, ICON_SETTINGS, 3 }, { STR_TASKBAR, ICON_SETTINGS, 3 },
+    { STR_LANGUAGE, ICON_SETTINGS, 3 }, { STR_PRIVACY, ICON_INFO, 5 },
+};
+#define MENU_APPS   ((int)(sizeof(menu_apps) / sizeof(menu_apps[0])))
+#define MENU_QUICK  ((int)(sizeof(menu_quick) / sizeof(menu_quick[0])))
+#define MENU_H      560
+#define MENU_PAD    24
+#define MENU_ROW    44
+#define MENU_TILE   96
+#define MENU_RECENT 6
+
+/* applications recemment ouvertes (actions 1..5), la plus recente en tete */
+static int recent[MENU_RECENT];
+static int recent_n;
+
+static void recent_push(int action)
+{
+    if (action < 1 || action > MENU_APPS) return;
+    int i = 0;
+    while (i < recent_n && recent[i] != action) i++;
+    if (i == recent_n && recent_n < MENU_RECENT) recent_n++;
+    for (; i > 0; i--) recent[i] = recent[i - 1];
+    recent[0] = action;
+}
+
+static const struct menu_item *menu_app(int action)
+{
+    for (int i = 0; i < MENU_APPS; i++)
+        if (menu_apps[i].action == action) return &menu_apps[i];
+    return NULL;
+}
+
+/* zones cliquables du menu, recalculees a chaque dessin */
+struct menu_hit_zone { struct rect r; int action; };
+static struct menu_hit_zone menu_zones[MENU_RECENT + MENU_QUICK + MENU_APPS + 3];
+static int menu_zone_n;
+static struct rect menu_search_rect;
+
+static void menu_zone(struct rect r, int action)
+{
+    if (menu_zone_n < (int)(sizeof(menu_zones) / sizeof(menu_zones[0])))
+        menu_zones[menu_zone_n++] = (struct menu_hit_zone){ r, action };
+}
 
 static void draw_menu(void)
 {
-    int h = 16 + FONT_H + 8 + MENU_ITEMS * MENU_ROW + 12 + 20;
-    int x = settings.taskbar_left_align ? 12 : dock_rect.x;
+    int w = MENU_W, h = MENU_H;
+    if (h > screen->h - TASKBAR_H - 24) h = screen->h - TASKBAR_H - 24;
+    int x = settings.taskbar_left_align ? 12 : (screen->w - w) / 2;
     int y = settings.taskbar_top ? TASKBAR_H + 8 : screen->h - TASKBAR_H - 8 - h;
-    menu_rect = (struct rect){ x, y, MENU_W, h };
-    gfx_fill_rounded(back, (struct rect){ x + 2, y + 4, MENU_W, h }, 14, C_SHADOW);
-    gfx_fill_rounded(back, menu_rect, 14, RGBA(30, 32, 42, 240));
-    gfx_rect(back, menu_rect, RGBA(255, 255, 255, 30));
-    gfx_text(back, x + 16, y + 12, L(STR_APPS), RGBA(255, 255, 255, 140));
-    int ry = y + 12 + FONT_H + 8;
-    for (int i = 0; i < MENU_ITEMS; i++) {
-        if (i == 5) {
-            gfx_hline(back, x + 12, ry + 4, MENU_W - 24, RGBA(255, 255, 255, 40));
-            ry += 12;
-            gfx_text(back, x + 16, ry - 2, L(STR_SYSTEM), RGBA(255, 255, 255, 140));
-            ry += FONT_H + 4;
+    menu_rect = (struct rect){ x, y, w, h };
+    menu_zone_n = 0;
+
+    gfx_fill_rounded(back, (struct rect){ x + 2, y + 6, w, h }, 18, C_SHADOW);
+    gfx_fill_rounded(back, menu_rect, 18, RGBA(28, 30, 40, 244));
+    gfx_rect(back, menu_rect, RGBA(255, 255, 255, 40));
+
+    /* champ de recherche */
+    menu_search_rect = (struct rect){ x + MENU_PAD, y + MENU_PAD, w - 2 * MENU_PAD, 40 };
+    gfx_fill_rounded(back, menu_search_rect, 20, RGBA(255, 255, 255, 235));
+    int cx = menu_search_rect.x + 20, cy = menu_search_rect.y + 19;
+    gfx_fill_rounded(back, (struct rect){ cx - 6, cy - 6, 12, 12 }, 6, RGB(70, 74, 90));
+    gfx_fill_rounded(back, (struct rect){ cx - 4, cy - 4, 8, 8 }, 4, RGB(245, 245, 250));
+    gfx_fill(back, (struct rect){ cx + 4, cy + 4, 3, 7 }, RGB(70, 74, 90));
+    gfx_text(back, menu_search_rect.x + 38, menu_search_rect.y + (40 - FONT_H) / 2, L(STR_SEARCH_HINT), RGB(95, 100, 120));
+    menu_zone(menu_search_rect, -1);
+
+    int top = y + MENU_PAD + 40 + 24;
+    int bottom = y + h - MENU_PAD - 48;
+    int col_w = (w - 2 * MENU_PAD - 24) / 2;
+
+    /* colonne gauche : Recent */
+    {
+        int lx = x + MENU_PAD;
+        gfx_text(back, lx + 8, top, L(STR_RECENT), RGBA(255, 255, 255, 150));
+        int ry = top + FONT_H + 12;
+        if (!recent_n)
+            gfx_text(back, lx + 8, ry + 8, L(STR_NO_RECENT), RGBA(255, 255, 255, 110));
+        for (int i = 0; i < recent_n && ry + MENU_ROW <= bottom; i++) {
+            const struct menu_item *it = menu_app(recent[i]);
+            if (!it) continue;
+            struct rect row = { lx, ry, col_w, MENU_ROW };
+            if (rect_contains(row, hover_x, hover_y))
+                gfx_fill_rounded(back, row, 10, RGBA(255, 255, 255, 30));
+            wm_draw_icon(back, lx + 10, ry + 10, 24, it->icon);
+            gfx_text(back, lx + 46, ry + (MENU_ROW - FONT_H) / 2, L(it->label), C_TEXT_LIGHT);
+            menu_zone(row, it->action);
+            ry += MENU_ROW;
         }
-        struct rect row = { x + 8, ry, MENU_W - 16, MENU_ROW };
-        if (rect_contains(row, hover_x, hover_y))
-            gfx_fill_rounded(back, row, 8, RGBA(255, 255, 255, 30));
-        wm_draw_icon(back, x + 16, ry + 8, 24, menu_items[i].icon);
-        gfx_text(back, x + 52, ry + (MENU_ROW - FONT_H) / 2, L(menu_items[i].label), C_TEXT_LIGHT);
-        ry += MENU_ROW;
+    }
+
+    /* colonne droite : Recherches rapides puis grille d'applications */
+    {
+        int rx = x + MENU_PAD + col_w + 24;
+        gfx_vline(back, rx - 12, top, bottom - top, RGBA(255, 255, 255, 30));
+        gfx_text(back, rx + 8, top, L(STR_QUICK), RGBA(255, 255, 255, 150));
+        int ry = top + FONT_H + 12;
+        for (int i = 0; i < MENU_QUICK; i++) {
+            struct rect row = { rx, ry, col_w, 36 };
+            if (rect_contains(row, hover_x, hover_y))
+                gfx_fill_rounded(back, row, 10, RGBA(255, 255, 255, 30));
+            gfx_fill_rounded(back, (struct rect){ rx + 12, ry + 14, 8, 8 }, 4, C_ACCENT);
+            gfx_text(back, rx + 32, ry + (36 - FONT_H) / 2, L(menu_quick[i].label), C_TEXT_LIGHT);
+            menu_zone(row, menu_quick[i].action);
+            ry += 36;
+        }
+        ry += 16;
+        gfx_text(back, rx + 8, ry, L(STR_TOP_APPS), RGBA(255, 255, 255, 150));
+        ry += FONT_H + 12;
+        int per_row = col_w / MENU_TILE; if (per_row < 1) per_row = 1;
+        for (int i = 0; i < MENU_APPS; i++) {
+            int tx = rx + (i % per_row) * MENU_TILE, ty = ry + (i / per_row) * MENU_TILE;
+            if (ty + MENU_TILE > bottom) break;
+            struct rect tile = { tx, ty, MENU_TILE - 8, MENU_TILE - 8 };
+            if (rect_contains(tile, hover_x, hover_y))
+                gfx_fill_rounded(back, tile, 12, RGBA(255, 255, 255, 30));
+            wm_draw_icon(back, tx + (MENU_TILE - 8 - 40) / 2, ty + 12, 40, menu_apps[i].icon);
+            const char *lbl = L(menu_apps[i].label);
+            int tw = gfx_text_width(lbl);
+            if (tw > MENU_TILE - 12) tw = MENU_TILE - 12;
+            gfx_text(back, tx + (MENU_TILE - 8 - tw) / 2, ty + 60, lbl, C_TEXT_LIGHT);
+            menu_zone(tile, menu_apps[i].action);
+        }
+    }
+
+    /* pied : logo + nom, boutons redemarrer / arreter */
+    {
+        int fy = y + h - MENU_PAD - 40;
+        gfx_hline(back, x + MENU_PAD, fy - 12, w - 2 * MENU_PAD, RGBA(255, 255, 255, 30));
+        wm_draw_icon(back, x + MENU_PAD + 4, fy + 4, 32, ICON_NOX);
+        gfx_text(back, x + MENU_PAD + 46, fy + (40 - FONT_H) / 2, "NoxOS", C_TEXT_LIGHT);
+        const char *lbls[2] = { L(STR_REBOOT), L(STR_SHUTDOWN) };
+        int acts[2] = { 6, 7 };
+        int bx = x + w - MENU_PAD;
+        for (int i = 1; i >= 0; i--) {
+            int bw = gfx_text_width(lbls[i]) + 52;
+            bx -= bw;
+            struct rect b = { bx, fy, bw, 40 };
+            gfx_fill_rounded(back, b, 12, rect_contains(b, hover_x, hover_y) ? RGBA(255, 255, 255, 45) : RGBA(255, 255, 255, 18));
+            wm_draw_icon(back, bx + 10, fy + 10, 20, ICON_POWER);
+            gfx_text(back, bx + 38, fy + (40 - FONT_H) / 2, lbls[i], C_TEXT_LIGHT);
+            menu_zone(b, acts[i]);
+            bx -= 10;
+        }
     }
 }
 
 static int menu_hit(int mx, int my)
 {
-    int ry = menu_rect.y + 12 + FONT_H + 8;
-    for (int i = 0; i < MENU_ITEMS; i++) {
-        if (i == 5) ry += 12 + FONT_H + 4;
-        struct rect row = { menu_rect.x + 8, ry, MENU_W - 16, MENU_ROW };
-        if (rect_contains(row, mx, my))
-            return menu_items[i].action;
-        ry += MENU_ROW;
-    }
+    for (int i = 0; i < menu_zone_n; i++)
+        if (rect_contains(menu_zones[i].r, mx, my))
+            return menu_zones[i].action;
     return 0;
 }
 
@@ -711,6 +842,54 @@ static void draw_cursor(int mx, int my)
         }
 }
 
+static void copy_msg(char *dst, const char *src)
+{
+    size_t n = strlen(src);
+    if (n >= MSG_MAX) n = MSG_MAX - 1;
+    memcpy(dst, src, n);
+    dst[n] = '\0';
+}
+
+static void draw_toast(void)
+{
+    int w = gfx_text_width(toast_text) + 48 + 44;
+    if (w < 320) w = 320;
+    if (w > screen->w - 40) w = screen->w - 40;
+    int h = 24 + FONT_H * 2 + 8;
+    int x = screen->w - w - 16;
+    int y = settings.taskbar_top ? TASKBAR_H + 16 : screen->h - TASKBAR_H - 16 - h;
+    struct rect r = { x, y, w, h };
+    gfx_fill_rounded(back, (struct rect){ x + 2, y + 4, w, h }, 14, C_SHADOW);
+    gfx_fill_rounded(back, r, 14, RGBA(30, 32, 42, 240));
+    gfx_rect(back, r, RGBA(255, 255, 255, 30));
+    if (logo_px)
+        gfx_draw_rgba_scaled(back, x + 14, y + (h - 28) / 2, 28, 28, logo_size, logo_size, logo_px);
+    gfx_text(back, x + 54, y + 12, toast_title, C_TEXT_LIGHT);
+    gfx_text(back, x + 54, y + 12 + FONT_H + 4, toast_text, RGBA(255, 255, 255, 150));
+}
+
+static void draw_error(void)
+{
+    int w = gfx_text_width(err_text) + 64 + 48;
+    if (w < 380) w = 380;
+    if (w > screen->w - 40) w = screen->w - 40;
+    int h = 24 + FONT_H + 12 + FONT_H + 28 + 36 + 20;
+    int x = (screen->w - w) / 2, y = (screen->h - h) / 2;
+    struct rect r = { x, y, w, h };
+    gfx_fill_alpha(back, (struct rect){ 0, 0, screen->w, screen->h }, RGBA(0, 0, 0, 90));
+    gfx_fill_rounded(back, (struct rect){ x + 3, y + 6, w, h }, 16, C_SHADOW);
+    gfx_fill_rounded(back, r, 16, RGBA(34, 30, 40, 248));
+    gfx_rect(back, r, RGBA(255, 90, 90, 90));
+    /* pastille d'erreur : disque rouge avec une croix */
+    int cx = x + 24, cy = y + 24;
+    gfx_fill_rounded(back, (struct rect){ cx, cy, 36, 36 }, 18, RGB(214, 64, 64));
+    gfx_text(back, cx + 18 - FONT_W / 2, cy + 18 - FONT_H / 2, "x", C_TEXT_LIGHT);
+    gfx_text(back, x + 72, y + 24, err_title, C_TEXT_LIGHT);
+    gfx_text(back, x + 72, y + 24 + FONT_H + 12, err_text, RGBA(255, 255, 255, 170));
+    err_ok_rect = (struct rect){ x + w - 24 - 110, y + h - 20 - 36, 110, 36 };
+    wm_draw_button(back, err_ok_rect, L(STR_OK), rect_contains(err_ok_rect, hover_x, hover_y));
+}
+
 static void compose(void)
 {
     int mx, my;
@@ -729,6 +908,10 @@ static void compose(void)
         draw_menu();
     if (search_open)
         draw_search();
+    if (toast_until)
+        draw_toast();
+    if (err_open)
+        draw_error();
     draw_cursor(mx, my);
 
     /* presentation : une copie lineaire du backbuffer vers l'ecran */
@@ -759,7 +942,13 @@ static void send(struct window *w, struct wm_event ev)
 
 static void menu_action(int action)
 {
+    if (action == -1) {          /* champ de recherche du menu -> recherche */
+        menu_open = false; search_open = true; search_update(); need_redraw = true;
+        return;
+    }
+    if (action == 0) return;
     menu_open = false;
+    recent_push(action);
     switch (action) {
     case 1: app_open_explorer(NULL); break;
     case 2: app_open_terminal(); break;
@@ -778,10 +967,10 @@ static void dock_click(enum app_icon icon, struct window *win)
     if (icon == ICON_NOX) { menu_open = !menu_open; search_open = false; need_redraw = true; return; }
     if (win) { wm_focus(win); return; }
     switch (icon) {
-    case ICON_EXPLORER: app_open_explorer(NULL); break;
-    case ICON_TERMINAL: app_open_terminal(); break;
-    case ICON_SETTINGS: app_open_settings(); break;
-    case ICON_TASKMGR:  app_open_taskmgr(); break;
+    case ICON_EXPLORER: recent_push(1); app_open_explorer(NULL); break;
+    case ICON_TERMINAL: recent_push(2); app_open_terminal(); break;
+    case ICON_SETTINGS: recent_push(3); app_open_settings(); break;
+    case ICON_TASKMGR:  recent_push(4); app_open_taskmgr(); break;
     default: break;
     }
 }
@@ -815,6 +1004,11 @@ static void handle_mouse(const struct mouse_event *m)
     }
 
     /* MOUSE_DOWN */
+    if (err_open) {
+        if (rect_contains(err_ok_rect, m->x, m->y))
+            err_open = false;
+        return;
+    }
     if (menu_open) {
         if (rect_contains(menu_rect, m->x, m->y)) {
             menu_action(menu_hit(m->x, m->y));
@@ -914,6 +1108,8 @@ static void desktop_thread(void *arg)
     running = true;
     console_grab_keyboard(true);
     compose();                      /* bureau vide au demarrage : logo + recherche */
+    if (audio_available())
+        audio_play(SND_BOOT);
 
     for (;;) {
         struct mouse_event m;
@@ -922,7 +1118,9 @@ static void desktop_thread(void *arg)
 
         char c;
         while (keyboard_poll(&c)) {
+            if (err_open) { if (c == 27 || c == '\n' || c == '\r') { err_open = false; need_redraw = true; } continue; }
             if (menu_open && c == 27) { menu_open = false; need_redraw = true; continue; }
+            if (menu_open && c >= 32) { menu_open = false; search_open = true; search_len = 0; search_key(c); continue; }
             if (search_open) { search_key(c); continue; }
             if (!focused) { console_inject(c); continue; }   /* bureau vide : shell noyau */
             send(focused, (struct wm_event){ WM_KEY, 0, 0, 0, c });
@@ -930,6 +1128,7 @@ static void desktop_thread(void *arg)
         }
 
         u32 now = timer_ticks();
+        if (toast_until && (i32)(now - toast_until) >= 0) { toast_until = 0; need_redraw = true; }
         if (now - last_tick >= TIMER_HZ / 2) {
             last_tick = now;
             for (struct window *w = windows; w; w = w->next)
@@ -997,6 +1196,27 @@ void desktop_reboot(void)
     kprintf("desktop: reboot\n");
     outb(0x64, 0xFE);                 /* 8042 : impulsion reset */
     for (;;) hlt();
+}
+
+void desktop_notify(const char *title, const char *text)
+{
+    copy_msg(toast_title, title ? title : L(STR_NOTIF_TITLE));
+    copy_msg(toast_text, text ? text : "");
+    toast_until = timer_ticks() + TOAST_MS / (1000 / TIMER_HZ);
+    if (!toast_until) toast_until = 1;
+    need_redraw = true;
+    if (audio_available())
+        audio_play(SND_NOTIFY);
+}
+
+void desktop_error(const char *title, const char *text)
+{
+    copy_msg(err_title, title ? title : L(STR_ERROR_TITLE));
+    copy_msg(err_text, text ? text : "");
+    err_open = true;
+    need_redraw = true;
+    if (audio_available())
+        audio_play(SND_ERROR);
 }
 
 void desktop_shutdown(void)

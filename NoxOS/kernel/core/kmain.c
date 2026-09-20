@@ -33,6 +33,7 @@
 #include <nox/shell.h>
 #include <nox/desktop.h>
 #include <nox/io.h>
+#include <nox/audio.h>
 
 extern u8 _kernel_start[];
 extern u8 _kernel_end[];
@@ -125,6 +126,12 @@ void kmain(u32 magic, const struct boot_info *info)
     process_init();
 
     sti();
+
+    step("audio");
+    if (audio_init())
+        kprintf("       %s ready, %d%%\n", audio_name(), audio_volume());
+    else
+        kprintf("       no audio device\n");
 
     struct cpu_info cpu;
     cpu_detect(&cpu);

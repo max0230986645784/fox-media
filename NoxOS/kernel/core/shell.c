@@ -20,10 +20,12 @@
 #include <nox/io.h>
 #include <nox/ata.h>
 #include <nox/fs.h>
+#include <nox/audio.h>
+#include <nox/desktop.h>
 #include <nox/process.h>
 
 #define LINE_MAX 128
-#define ARGS_MAX 8
+#define ARGS_MAX 16
 
 struct command {
     const char *name;
@@ -45,6 +47,10 @@ static void cmd_run(int argc, char **argv);
 static void cmd_procs(int argc, char **argv);
 static void cmd_heaptest(int argc, char **argv);
 static void cmd_disk(int argc, char **argv);
+static void cmd_play(int argc, char **argv);
+static void cmd_notify(int argc, char **argv);
+static void cmd_error(int argc, char **argv);
+static void cmd_volume(int argc, char **argv);
 static void cmd_ls(int argc, char **argv);
 static void cmd_cat(int argc, char **argv);
 static void cmd_cd(int argc, char **argv);
@@ -70,6 +76,10 @@ static const struct command commands[] = {
     { "procs",   "list user processes",               cmd_procs },
     { "heaptest","allocate/free stress test",          cmd_heaptest },
     { "disk",    "show ATA disk and NoxFS info",       cmd_disk },
+    { "play",    "play boot|error|notify|<file.wav> (stop)", cmd_play },
+    { "volume",  "show or set audio volume 0..100",    cmd_volume },
+    { "notify",  "show a desktop notification",        cmd_notify },
+    { "error",   "show a desktop error dialog",        cmd_error },
     { "ls",      "list directory",                     cmd_ls },
     { "cat",     "print a file",                       cmd_cat },
     { "cd",      "change directory",                   cmd_cd },
@@ -203,6 +213,57 @@ static void cmd_run(int argc, char **argv)
     int code = process_wait((u32)pid);
     console_set_owner(0);
     kprintf("[pid %d exited with code %d]\n", pid, code);
+}
+
+static void cmd_play(int argc, char **argv)
+{
+    if (!audio_available()) { kprintf("play: no audio device\n"); return; }
+    if (argc < 2) { kprintf("usage: play boot|error|notify|stop|<file.wav>\n"); return; }
+    bool ok;
+    if (!strcmp(argv[1], "stop"))        { audio_stop(); return; }
+    else if (!strcmp(argv[1], "boot"))   ok = audio_play(SND_BOOT);
+    else if (!strcmp(argv[1], "error"))  ok = audio_play(SND_ERROR);
+    else if (!strcmp(argv[1], "notify")) ok = audio_play(SND_NOTIFY);
+    else                                 ok = audio_play_file(argv[1]);
+    kprintf(ok ? "playing on %s\n" : "play: cannot play '%s' (missing or not WAV 16-bit stereo 48 kHz)\n",
+            ok ? audio_name() : argv[1]);
+}
+
+static void join_args(int argc, char **argv, char *out, size_t cap)
+{
+    out[0] = '\0';
+    for (int i = 1; i < argc; i++) {
+        size_t n = strlen(out), m = strlen(argv[i]);
+        if (n + m + 2 > cap) break;
+        if (n) out[n++] = ' ';
+        memcpy(out + n, argv[i], m + 1);
+    }
+}
+
+static void cmd_notify(int argc, char **argv)
+{
+    char text[96];
+    join_args(argc, argv, text, sizeof text);
+    if (!desktop_running()) { kprintf("notify: desktop not running\n"); return; }
+    desktop_notify(NULL, text[0] ? text : "NoxOS");
+}
+
+static void cmd_error(int argc, char **argv)
+{
+    char text[96];
+    join_args(argc, argv, text, sizeof text);
+    if (!desktop_running()) { kprintf("error: desktop not running\n"); return; }
+    desktop_error(NULL, text[0] ? text : "Une erreur est survenue.");
+}
+
+static void cmd_volume(int argc, char **argv)
+{
+    if (argc > 1) {
+        int v = 0;
+        for (const char *p = argv[1]; *p >= '0' && *p <= '9'; p++) v = v * 10 + (*p - '0');
+        audio_set_volume(v);
+    }
+    kprintf("volume: %d%%\n", audio_volume());
 }
 
 /* Thread de demonstration : affiche quelques messages en dormant entre

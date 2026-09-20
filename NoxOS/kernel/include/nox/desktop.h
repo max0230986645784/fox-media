@@ -31,6 +31,12 @@ void app_open_taskmgr(void);
 void app_open_about(void);
 void app_open_text(const char *path);
 
+/* Notification (bulle en bas a droite, disparait seule) et boite d'erreur
+ * (modale, bouton OK). Jouent le son systeme correspondant. Utilisables
+ * depuis n'importe quel thread. */
+void desktop_notify(const char *title, const char *text);
+void desktop_error(const char *title, const char *text);
+
 void desktop_shutdown(void);
 void desktop_reboot(void);
 

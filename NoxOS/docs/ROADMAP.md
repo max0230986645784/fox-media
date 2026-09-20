@@ -80,9 +80,28 @@ gestionnaire de paquets, Nox Studio, SDK, installation, stabilisation.
 | Nox Aurora | premier bureau graphique (v0.4) |
 | Nox Nova | explorateur, applications, gestionnaire des tâches |
 | Nox Guardian | comptes, permissions, écriture disque |
-| Nox Beta | réseau, Internet, connexion Discord (QR code) |
+| Nox Beta | réseau, Internet, connexion Discord (QR code), **Nox Navigateur** |
 | Nox Ultimate | avant-dernière : stabilisation, installation, **clé USB bootable** |
 | Nox OS | version finale publique |
+
+### Nox Store et pilotes matériels
+
+- **Nox Store** : boutique intégrée (apps Nox, jeux, outils ; gratuit et payant),
+  façon Microsoft Store, reposant sur le gestionnaire de paquets Nox.
+- **Pilotes** : détection du matériel au premier démarrage (CPU, GPU, son,
+  réseau, stockage), installation et mise à jour des pilotes (dont pilotes
+  graphiques) depuis Paramètres / Nox Update, façon Windows Update.
+  Le noyau embarque déjà PCI, ATA, PS/2, VBE et AC'97 ; les pilotes GPU
+  natifs viendront après le réseau.
+
+### Nox Navigateur
+
+Navigateur web intégré à NoxOS, écrit pour NoxOS (pas un moteur tiers).
+Inspiration **Opera GX** (orientation gamer) sans le copier : thème sombre
+néon aux couleurs Nox, barre latérale (Discord, musique), limiteurs
+RAM/CPU/réseau (« GX Control » façon Nox), mode jeu, page d'accueil avec
+recherche façon Google, onglets, favoris, téléchargements vers NoxFS.
+Dépend de la pile réseau (TCP/IP, TLS, HTTP) puis d'un moteur HTML/CSS.
 
 Clé USB : `build/noxos.img` est déjà une image disque brute (MBR) ; l'écriture
 sur clé (`dd` / Rufus) et l'installateur seront finalisés pour Nox Ultimate.

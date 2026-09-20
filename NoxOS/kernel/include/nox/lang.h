@@ -78,6 +78,16 @@ enum str_id {
     STR_VERSION,
     STR_LINES,
     STR_SCROLL_HINT,
+    STR_RECENT,
+    STR_QUICK,
+    STR_TOP_APPS,
+    STR_NO_RECENT,
+    STR_POWER,
+    STR_OK,
+    STR_ERROR_TITLE,
+    STR_NOTIF_TITLE,
+    STR_WELCOME,
+    STR_WELCOME_TEXT,
     STR_COUNT
 };
 
