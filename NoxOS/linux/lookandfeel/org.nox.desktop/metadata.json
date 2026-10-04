@@ -1,0 +1,12 @@
+{
+    "KPackageStructure": "Plasma/LookAndFeel",
+    "KPlugin": {
+        "Authors": [ { "Name": "Nox OS" } ],
+        "Description": "Bureau Nox OS : sombre, barre flottante en bas",
+        "Id": "org.nox.desktop",
+        "License": "GPL",
+        "Name": "Nox",
+        "Version": "1.0"
+    },
+    "X-Plasma-MainScript": "defaults"
+}

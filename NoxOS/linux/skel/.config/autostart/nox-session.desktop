@@ -1,0 +1,5 @@
+[Desktop Entry]
+Type=Application
+Name=Nox Session
+Exec=/usr/lib/nox/nox-session-start
+X-KDE-autostart-phase=0

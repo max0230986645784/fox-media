@@ -1,0 +1,26 @@
+[Event/startkde]
+Action=
+[Event/exitkde]
+Action=Sound
+Sound=/usr/share/sounds/nox/shutdown.oga
+[Event/catastrophe]
+Action=Sound
+Sound=/usr/share/sounds/nox/critical.oga
+[Event/fatalerror]
+Action=Sound
+Sound=/usr/share/sounds/nox/error.oga
+[Event/messageCritical]
+Action=Sound|Popup
+Sound=/usr/share/sounds/nox/error.oga
+[Event/messageWarning]
+Action=Sound|Popup
+Sound=/usr/share/sounds/nox/warning.oga
+[Event/messageInformation]
+Action=Sound|Popup
+Sound=/usr/share/sounds/nox/notification.oga
+[Event/notification]
+Action=Sound|Popup
+Sound=/usr/share/sounds/nox/notification.oga
+[Event/Trash: emptied]
+Action=Sound
+Sound=/usr/share/sounds/nox/recycle.oga

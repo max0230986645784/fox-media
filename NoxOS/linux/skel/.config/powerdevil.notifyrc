@@ -1,0 +1,6 @@
+[Event/lowbattery]
+Action=Sound|Popup
+Sound=/usr/share/sounds/nox/battery-low.oga
+[Event/pluggedin]
+Action=Sound
+Sound=/usr/share/sounds/nox/charging.oga

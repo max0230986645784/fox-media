@@ -1,0 +1,18 @@
+#!/bin/sh
+# Applique le fond Nox au bureau Plasma une fois plasmashell demarre (premier lancement seulement).
+MARK="$HOME/.config/nox-wallpaper-applied"
+[ -f "$MARK" ] && exit 0
+for i in $(seq 1 40); do
+    qdbus org.kde.plasmashell /PlasmaShell >/dev/null 2>&1 && break
+    sleep 1
+done
+sleep 3
+qdbus org.kde.plasmashell /PlasmaShell evaluateScript '
+var ds = desktops();
+for (var i = 0; i < ds.length; i++) {
+    var d = ds[i];
+    d.wallpaperPlugin = "org.kde.image";
+    d.currentConfigGroup = ["Wallpaper", "org.kde.image", "General"];
+    d.writeConfig("Image", "file:///usr/share/nox/wallpapers/nox.jpg");
+    d.writeConfig("FillMode", 2);
+}' >/dev/null 2>&1 && touch "$MARK"
