@@ -222,6 +222,25 @@ void gfx_char(struct surface *s, int x, int y, char c, u32 fg)
     }
 }
 
+void gfx_char_scaled(struct surface *s, int x, int y, int scale, char c, u32 fg)
+{
+    const u8 *g = font8x16[(u8)c];
+    for (int row = 0; row < FONT_H; row++) {
+        u8 bits = g[row];
+        if (!bits)
+            continue;
+        for (int col = 0; col < FONT_W; col++)
+            if (bits & (0x80 >> col))
+                gfx_fill_alpha(s, (struct rect){ x + col * scale, y + row * scale, scale, scale }, fg);
+    }
+}
+
+void gfx_text_scaled(struct surface *s, int x, int y, int scale, const char *str, u32 fg)
+{
+    for (; *str; str++, x += FONT_W * scale)
+        gfx_char_scaled(s, x, y, scale, *str, fg);
+}
+
 void gfx_text(struct surface *s, int x, int y, const char *str, u32 fg)
 {
     for (; *str; str++, x += FONT_W)

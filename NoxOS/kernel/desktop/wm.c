@@ -71,6 +71,18 @@ static struct search_result search_results[SEARCH_ROWS];
 static int  search_count;
 static struct rect search_panel;
 static void recent_push(int action);
+static void load_logo(void);
+
+/* ecran de demarrage, verrouillage et connexion (facon Windows, style Nox) */
+enum screen_state { SCR_SETUP, SCR_SETUP_CONFIRM, SCR_LOCK, SCR_LOGIN, SCR_DESKTOP };
+static enum screen_state scr_state;
+#define PIN_MAX 32
+#define SPLASH_MIN_MS 3000
+static char pin[PIN_MAX + 1], pin_first[PIN_MAX + 1], pin_buf[PIN_MAX + 1];
+static int  pin_len;
+static const char *login_msg;
+static u32  splash_start;
+static bool splash_on;
 
 /* notification + boite d'erreur */
 #define TOAST_MS   6000
@@ -842,6 +854,185 @@ static void draw_cursor(int mx, int my)
         }
 }
 
+static void draw_logo_centered(struct surface *s, int cx, int cy, int size)
+{
+    if (logo_px)
+        gfx_draw_rgba_scaled(s, cx - size / 2, cy - size / 2, size, size, logo_size, logo_size, logo_px);
+    else
+        gfx_text_scaled(s, cx - FONT_W * 3 * 3 / 2, cy - FONT_H * 3 / 2, 3, "NOX", C_TEXT_LIGHT);
+}
+
+/* 6 points sur un cercle, l'un apres l'autre s'eclaire (facon anneau Windows) */
+static void draw_spinner(struct surface *s, int cx, int cy, u32 ms)
+{
+    static const int dx[8] = { 0, 12, 17, 12, 0, -12, -17, -12 };
+    static const int dy[8] = { -17, -12, 0, 12, 17, 12, 0, -12 };
+    int head = (int)((ms / 90) % 8);
+    gfx_fill(s, (struct rect){ cx - 24, cy - 24, 48, 48 }, RGB(0, 0, 0));
+    for (int i = 0; i < 8; i++) {
+        int age = (head - i + 8) % 8;
+        int a = 255 - age * 30;
+        gfx_fill_rounded(s, (struct rect){ cx + dx[i] - 3, cy + dy[i] - 3, 6, 6 }, 3, RGBA(240, 240, 245, a));
+    }
+}
+
+void desktop_splash_begin(void)
+{
+    struct surface *s = fb_surface();
+    if (!s)
+        return;
+    screen = s;
+    if (!logo_px)
+        load_logo();
+    gfx_fill(s, (struct rect){ 0, 0, s->w, s->h }, RGB(0, 0, 0));
+    draw_logo_centered(s, s->w / 2, s->h / 2 - 40, s->h / 5);
+    draw_spinner(s, s->w / 2, s->h / 2 + s->h / 10 + 40, 0);
+    splash_start = timer_ticks();
+    splash_on = true;
+}
+
+void desktop_splash_end(void)
+{
+    struct surface *s = fb_surface();
+    if (!s || !splash_on)
+        return;
+    splash_on = false;
+    for (;;) {
+        u32 ms = (timer_ticks() - splash_start) * (1000 / TIMER_HZ);
+        draw_spinner(s, s->w / 2, s->h / 2 + s->h / 10 + 40, ms);
+        if (ms >= SPLASH_MIN_MS)
+            break;
+        thread_sleep_ms(30);
+    }
+}
+
+static void fmt_clock(char *clock, char *date)
+{
+    struct rtc_time t;
+    rtc_read(&t);
+    clock[0] = (char)('0' + t.hour / 10); clock[1] = (char)('0' + t.hour % 10); clock[2] = ':';
+    clock[3] = (char)('0' + t.minute / 10); clock[4] = (char)('0' + t.minute % 10); clock[5] = 0;
+    date[0] = (char)('0' + t.day / 10); date[1] = (char)('0' + t.day % 10); date[2] = '/';
+    date[3] = (char)('0' + t.month / 10); date[4] = (char)('0' + t.month % 10); date[5] = '/';
+    utoa(t.year, date + 6, 10);
+}
+
+static void draw_pin_field(int cx, int y, int w)
+{
+    struct rect f = { cx - w / 2, y, w, 40 };
+    gfx_fill_rounded(back, f, 10, RGBA(255, 255, 255, 40));
+    gfx_rect(back, f, RGBA(255, 255, 255, 90));
+    int dots = pin_len, dw = 14;
+    int x = cx - dots * dw / 2 + dw / 2;
+    for (int i = 0; i < dots; i++, x += dw)
+        gfx_fill_rounded(back, (struct rect){ x - 4, y + 16, 8, 8 }, 4, C_TEXT_LIGHT);
+    if (!dots) {
+        const char *h = scr_state == SCR_SETUP_CONFIRM ? L(STR_SETUP_CONFIRM)
+                      : scr_state == SCR_SETUP ? L(STR_SETUP_TEXT) : L(STR_LOGIN_HINT);
+        gfx_text(back, cx - gfx_text_width(h) / 2, y + 12, h, RGBA(255, 255, 255, 130));
+    }
+}
+
+static void draw_lock(void)
+{
+    gfx_copy(back, 0, 0, wallpaper, (struct rect){ 0, 0, wallpaper->w, wallpaper->h });
+    gfx_fill_alpha(back, (struct rect){ 0, 0, screen->w, screen->h }, RGBA(0, 0, 0, 70));
+    char clock[8], date[12];
+    fmt_clock(clock, date);
+    int sc = screen->h >= 1000 ? 8 : 5;
+    int cx = screen->w / 2, y = screen->h / 4;
+    gfx_text_scaled(back, cx - (int)strlen(clock) * FONT_W * sc / 2 + 4, y + 4, sc, clock, RGBA(0, 0, 0, 120));
+    gfx_text_scaled(back, cx - (int)strlen(clock) * FONT_W * sc / 2, y, sc, clock, C_TEXT_LIGHT);
+    gfx_text_scaled(back, cx - (int)strlen(date) * FONT_W * 2 / 2, y + FONT_H * sc + 16, 2, date, RGBA(255, 255, 255, 200));
+    const char *h = L(STR_LOCK_HINT);
+    gfx_text(back, cx - gfx_text_width(h) / 2, screen->h - 80, h, RGBA(255, 255, 255, 160));
+}
+
+static void draw_login(void)
+{
+    gfx_copy(back, 0, 0, wallpaper, (struct rect){ 0, 0, wallpaper->w, wallpaper->h });
+    gfx_fill_alpha(back, (struct rect){ 0, 0, screen->w, screen->h }, RGBA(0, 0, 0, 150));
+    int cx = screen->w / 2, cy = screen->h / 2 - 60;
+    int av = 160;
+    gfx_fill_rounded(back, (struct rect){ cx - av / 2 - 6, cy - av / 2 - 6, av + 12, av + 12 }, (av + 12) / 2, RGBA(255, 255, 255, 40));
+    gfx_fill_rounded(back, (struct rect){ cx - av / 2, cy - av / 2, av, av }, av / 2, RGB(28, 30, 38));
+    draw_logo_centered(back, cx, cy, av * 3 / 4);
+    const char *name = scr_state == SCR_SETUP || scr_state == SCR_SETUP_CONFIRM ? L(STR_SETUP_TITLE) : "Nox";
+    gfx_text_scaled(back, cx - (int)strlen(name) * FONT_W * 2 / 2, cy + av / 2 + 24, 2, name, C_TEXT_LIGHT);
+    draw_pin_field(cx, cy + av / 2 + 24 + FONT_H * 2 + 24, 360);
+    int my = cy + av / 2 + 24 + FONT_H * 2 + 24 + 52;
+    if (login_msg)
+        gfx_text(back, cx - gfx_text_width(login_msg) / 2, my, login_msg, RGB(255, 120, 120));
+    else if (pin_len) {
+        const char *h = L(STR_ENTER_HINT);
+        gfx_text(back, cx - gfx_text_width(h) / 2, my, h, RGBA(255, 255, 255, 130));
+    }
+}
+
+static void present(void)
+{
+    if (screen->pitch == back->pitch)
+        memcpy(screen->pixels, back->pixels, (u32)screen->pitch * (u32)screen->h * 4u);
+    else
+        gfx_copy(screen, 0, 0, back, (struct rect){ 0, 0, back->w, back->h });
+    need_redraw = false;
+}
+
+static void enter_desktop(void)
+{
+    scr_state = SCR_DESKTOP;
+    pin_len = 0; login_msg = NULL;
+    need_redraw = true;
+    kprintf("desktop: session opened\n");
+    if (audio_available())
+        audio_play(SND_BOOT);
+}
+
+static void pin_key(char c)
+{
+    need_redraw = true;
+    if (c == '\n' || c == '\r') {
+        pin_buf[pin_len] = '\0';
+        if (scr_state == SCR_SETUP) {
+            if (pin_len < 4) { login_msg = L(STR_SETUP_SHORT); pin_len = 0; return; }
+            strcpy(pin_first, pin_buf); pin_len = 0; login_msg = NULL;
+            scr_state = SCR_SETUP_CONFIRM;
+        } else if (scr_state == SCR_SETUP_CONFIRM) {
+            if (strcmp(pin_first, pin_buf)) { login_msg = L(STR_SETUP_MISMATCH); pin_len = 0; scr_state = SCR_SETUP; return; }
+            strcpy(pin, pin_buf);
+            enter_desktop();
+        } else {
+            if (!strcmp(pin, pin_buf)) enter_desktop();
+            else { login_msg = L(STR_LOGIN_BAD); pin_len = 0; }
+        }
+        return;
+    }
+    if (c == 27) { pin_len = 0; login_msg = NULL; if (scr_state == SCR_LOGIN) scr_state = SCR_LOCK; return; }
+    if (c == 8 || c == 127) { if (pin_len) pin_len--; return; }
+    if (c >= 32 && pin_len < PIN_MAX) { pin_buf[pin_len++] = c; login_msg = NULL; }
+}
+
+/* /etc/nox.pin dans NoxFS = code deja choisi (sinon premier demarrage) */
+static void load_pin(void)
+{
+    pin[0] = '\0';
+    if (!fs_mounted())
+        return;
+    int idx = fs_lookup("/etc/nox.pin", 0);
+    if (idx < 0)
+        return;
+    u32 size;
+    char *f = fs_load(idx, &size);
+    if (!f)
+        return;
+    u32 n = 0;
+    while (n < size && n < PIN_MAX && f[n] > ' ')
+        n++;
+    memcpy(pin, f, n);
+    pin[n] = '\0';
+    kfree(f);
+}
+
 static void copy_msg(char *dst, const char *src)
 {
     size_t n = strlen(src);
@@ -914,12 +1105,7 @@ static void compose(void)
         draw_error();
     draw_cursor(mx, my);
 
-    /* presentation : une copie lineaire du backbuffer vers l'ecran */
-    if (screen->pitch == back->pitch)
-        memcpy(screen->pixels, back->pixels, (u32)screen->pitch * (u32)screen->h * 4u);
-    else
-        gfx_copy(screen, 0, 0, back, (struct rect){ 0, 0, back->w, back->h });
-    need_redraw = false;
+    present();
 }
 
 /* --------------------------------------------------------------------------
@@ -1107,16 +1293,38 @@ static void desktop_thread(void *arg)
     u32 last_tick = timer_ticks();
     running = true;
     console_grab_keyboard(true);
-    compose();                      /* bureau vide au demarrage : logo + recherche */
-    if (audio_available())
-        audio_play(SND_BOOT);
+    load_pin();
+    scr_state = pin[0] ? SCR_LOCK : SCR_SETUP;
+    need_redraw = true;
 
     for (;;) {
         struct mouse_event m;
+        char c;
+
+        if (scr_state != SCR_DESKTOP) {
+            while (mouse_poll_event(&m)) {
+                need_redraw = true;
+                if (m.type == MOUSE_DOWN && scr_state == SCR_LOCK) scr_state = SCR_LOGIN;
+            }
+            while (keyboard_poll(&c)) {
+                if (scr_state == SCR_LOCK) { scr_state = SCR_LOGIN; need_redraw = true; continue; }
+                pin_key(c);
+            }
+            u32 t = timer_ticks();
+            if (t - last_tick >= TIMER_HZ / 2) { last_tick = t; need_redraw = true; }
+            if (need_redraw && scr_state != SCR_DESKTOP) {
+                if (scr_state == SCR_LOCK) draw_lock(); else draw_login();
+                int mx, my; mouse_state(&mx, &my, NULL);
+                draw_cursor(mx, my);
+                present();
+            }
+            thread_sleep_ms(16);
+            continue;
+        }
+
         while (mouse_poll_event(&m))
             handle_mouse(&m);
 
-        char c;
         while (keyboard_poll(&c)) {
             if (err_open) { if (c == 27 || c == '\n' || c == '\r') { err_open = false; need_redraw = true; } continue; }
             if (menu_open && c == 27) { menu_open = false; need_redraw = true; continue; }
@@ -1157,7 +1365,8 @@ bool desktop_start(void)
         kprintf("desktop: out of memory\n");
         return false;
     }
-    load_logo();
+    if (!logo_px)
+        load_logo();
     if (settings.wallpaper_auto) {
         /* rotation "a chaque demarrage" : la seconde RTC sert de graine */
         struct rtc_time t;

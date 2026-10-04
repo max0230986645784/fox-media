@@ -37,6 +37,12 @@ void app_open_text(const char *path);
 void desktop_notify(const char *title, const char *text);
 void desktop_error(const char *title, const char *text);
 
+/* Ecran de demarrage (logo + animation) affiche pendant l'init du noyau.
+ * begin() dessine immediatement (avant le scheduler) ; end() anime les
+ * points jusqu'a une duree minimale puis rend la main. */
+void desktop_splash_begin(void);
+void desktop_splash_end(void);
+
 void desktop_shutdown(void);
 void desktop_reboot(void);
 

@@ -38,7 +38,13 @@ serial_send() {
 # Le script ci-dessous alimente le moniteur QEMU (stdin) et, en parallele,
 # le port serie.
 (
-    sleep 3                                     # temps de boot
+    sleep 7                                     # boot + ecran de demarrage (3 s)
+    # premier demarrage : choix du code Nox (1234) puis confirmation
+    for k in 1 2 3 4 ret 1 2 3 4 ret; do
+        echo "sendkey $k"
+        sleep 0.15
+    done
+    sleep 1
     for k in v e r s i o n ret; do              # clavier PS/2 virtuel
         echo "sendkey $k"
         sleep 0.15
@@ -69,7 +75,7 @@ serial_send() {
     serial_send "ps"
     exec 3>&-
     echo "quit"
-) | timeout 40 "$QEMU" \
+) | timeout 50 "$QEMU" \
     -drive file="$IMAGE",format=raw,if=ide -m 64M -no-reboot \
     -display none -monitor stdio -audiodev none,id=snd0 -device AC97,audiodev=snd0 \
     -chardev socket,id=ser0,host=127.0.0.1,port="$PORT",server=on,wait=off,logfile="$LOG" \
@@ -89,7 +95,18 @@ echo "NoxOS v0.3 boot tests"
 check "NOXOS KERNEL v"                     "kernel banner printed"
 check "System initialized successfully."   "kernel init completed"
 check "E820 entries:"                      "memory map received from bootloader"
-check "nox> version"                       "PS/2 keyboard input reaches the shell"
+check "desktop: session opened"            "first-boot code setup + login screen accepted the code"
+check_line() {
+    # ligne entiere (l'echo clavier "version" suit le message "session opened"
+    # qui a coupe l'invite)
+    if tr -d "\r" < "$LOG" 2>/dev/null | grep -qxF -- "$1"; then
+        echo "  [PASS] $2"
+    else
+        echo "  [FAIL] $2  (expected line: '$1')"
+        fail=1
+    fi
+}
+check_line "version"                        "PS/2 keyboard input reaches the shell"
 check "NoxOS 0.3.0 - Built from scratch."  "'version' command works"
 check "list available commands"            "'help' via serial works"
 check "serial ok"                          "'echo' via serial works"

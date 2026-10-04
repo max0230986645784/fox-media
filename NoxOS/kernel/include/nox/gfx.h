@@ -72,5 +72,7 @@ void gfx_draw_rgba_scaled(struct surface *s, int x, int y, int dw, int dh,
 void gfx_char(struct surface *s, int x, int y, char c, u32 fg);   /* fond transparent */
 void gfx_text(struct surface *s, int x, int y, const char *str, u32 fg);
 int  gfx_text_width(const char *str);
+void gfx_char_scaled(struct surface *s, int x, int y, int scale, char c, u32 fg);
+void gfx_text_scaled(struct surface *s, int x, int y, int scale, const char *str, u32 fg);
 
 #endif

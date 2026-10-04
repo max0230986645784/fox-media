@@ -176,6 +176,7 @@ void kprintf(const char *fmt, ...)
 void panic(const char *fmt, ...)
 {
     cli();
+    fbcon_show();
     console_set_color(VGA_WHITE, VGA_RED);
     kputs("\n*** KERNEL PANIC *** ");
     va_list ap;

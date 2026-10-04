@@ -55,8 +55,10 @@ static void step(const char *what)
 void kmain(u32 magic, const struct boot_info *info)
 {
     serial_init();
-    if (magic == NOX_BOOT_MAGIC && fb_init(info))
+    if (magic == NOX_BOOT_MAGIC && fb_init(info)) {
         fbcon_init();
+        fbcon_hide();               /* demarrage silencieux : ecran noir puis logo */
+    }
     else
         vga_init();
     print_banner();
@@ -121,6 +123,9 @@ void kmain(u32 magic, const struct boot_info *info)
         kprintf("       no ATA disk\n");
     }
 
+    if (fb_active())
+        desktop_splash_begin();     /* logo Nox + points de chargement */
+
     step("scheduler");
     sched_init();
     process_init();
@@ -137,6 +142,9 @@ void kmain(u32 magic, const struct boot_info *info)
     cpu_detect(&cpu);
     kprintf("       cpu: %s\n", cpu.brand);
 
+    if (fb_active())
+        desktop_splash_end();       /* laisse l'animation tourner ~3 s minimum */
+
     console_set_color(VGA_LIGHT_GREEN, VGA_BLACK);
     kprintf("\nSystem initialized successfully.\n\n");
     console_set_color(VGA_LIGHT_GREY, VGA_BLACK);
@@ -145,6 +153,8 @@ void kmain(u32 magic, const struct boot_info *info)
         step("desktop");
         if (desktop_start())
             kprintf("       Nox Desktop started\n");
+        else
+            fbcon_show();
     }
 
     shell_run();

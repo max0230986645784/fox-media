@@ -13,7 +13,7 @@
 static struct surface *scr;
 static int cols, rows, col, row;
 static u32 fg = 0xFFC8C8C8, bg = 0xFF101418;
-static bool ready;
+static bool ready, hidden;
 
 static const u32 vga_palette[16] = {
     0xFF000000, 0xFF0000AA, 0xFF00AA00, 0xFF00AAAA, 0xFFAA0000, 0xFFAA00AA,
@@ -60,9 +60,20 @@ static void cell(int c, int r, char ch)
         gfx_char(scr, cr.x, cr.y, ch, fg);
 }
 
+void fbcon_hide(void) { hidden = true; }
+
+void fbcon_show(void)
+{
+    if (!ready || !hidden)
+        return;
+    hidden = false;
+    gfx_fill(scr, (struct rect){ 0, 0, scr->w, scr->h }, bg);
+    col = row = 0;
+}
+
 void fbcon_putc(char c)
 {
-    if (!ready)
+    if (!ready || hidden)
         return;
     switch (c) {
     case '\n': col = 0; row++; break;
@@ -85,7 +96,7 @@ void fbcon_putc(char c)
 
 void fbcon_clear(void)
 {
-    if (!ready)
+    if (!ready || hidden)
         return;
     gfx_fill(scr, (struct rect){ 0, 0, scr->w, scr->h }, bg);
     col = row = 0;
