@@ -6,7 +6,7 @@ widgetStyle=Breeze
 LookAndFeelPackage=org.nox.desktop
 SingleClick=false
 [Icons]
-Theme=breeze-dark
+Theme=nox
 [Locale]
 LANG=fr_FR.UTF-8
 LC_TIME=fr_FR.UTF-8

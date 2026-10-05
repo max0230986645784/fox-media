@@ -37,7 +37,7 @@ icon=/usr/share/nox/logo.png
 useCustomButtonImage=true
 customButtonImage=/usr/share/nox/logo.png
 favoritesPortedToKAstats=false
-favoriteApps=org.kde.dolphin.desktop,firefox-esr.desktop,org.kde.konsole.desktop,systemsettings.desktop,org.kde.kate.desktop,org.kde.gwenview.desktop
+favoriteApps=nox-centre.desktop,org.kde.dolphin.desktop,firefox-esr.desktop,org.kde.konsole.desktop,systemsettings.desktop,org.kde.kate.desktop,org.kde.gwenview.desktop
 favoriteSystemActions=logout,reboot,shutdown
 
 [Containments][2][Applets][3][Shortcuts]
@@ -52,7 +52,7 @@ immutability=1
 plugin=org.kde.plasma.icontasks
 
 [Containments][2][Applets][5][Configuration][General]
-launchers=applications:org.kde.dolphin.desktop,applications:firefox-esr.desktop,applications:org.kde.konsole.desktop,applications:systemsettings.desktop
+launchers=applications:nox-centre.desktop,applications:org.kde.dolphin.desktop,applications:firefox-esr.desktop,applications:org.kde.konsole.desktop,applications:systemsettings.desktop
 showOnlyCurrentScreen=false
 indicateAudioStreams=false
 

@@ -1,0 +1,122 @@
+#!/usr/bin/python3
+"""Nox Centre : grille de tuiles Nox OS (alimentation, son, reseau, applis) — style tuiles arrondies bordure violette."""
+import os, shutil, subprocess, sys
+import gi
+gi.require_version("Gtk", "3.0")
+from gi.repository import Gtk, Gdk, GLib, GdkPixbuf
+
+CSS = b"""
+window { background-color: #0f0d1c; }
+.tile { background-image: none; box-shadow: none; text-shadow: none; background-color: #1e1b3a; border: 1px solid #5a4fd6; border-radius: 14px; padding: 14px 8px 10px 8px;
+        color: #ece8ff; font-size: 13px; transition: all 120ms; }
+.tile:hover { background-color: #2a2652; border-color: #8b7dff; }
+.tile:active { background-color: #3a3470; }
+.tile:disabled { opacity: 0.35; }
+.tile image { color: #ece8ff; -gtk-icon-shadow: none; }
+.title { color: #ece8ff; font-size: 18px; font-weight: bold; }
+.sub { color: #9a93c8; font-size: 12px; }
+"""
+
+def sh(*cmd):
+    return lambda: subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+def ksm(kind):   # 0 = deconnexion, 1 = redemarrer, 2 = arreter
+    return sh("qdbus", "org.kde.ksmserver", "/KSMServer", "logout", "0", str(kind), "2")
+
+def kcm(module):
+    return sh("kcmshell5", module)
+
+def first(*names):
+    for n in names:
+        if shutil.which(n):
+            return n
+    return None
+
+def opener(*names, args=()):
+    exe = first(*names)
+    return sh(exe, *args) if exe else None
+
+HOME = os.path.expanduser("~")
+dl = subprocess.run(["xdg-user-dir", "DOWNLOAD"], capture_output=True, text=True).stdout.strip() or HOME + "/Téléchargements"
+
+# (libelle, icone, action)
+TILES = [
+    ("Démarrer",      "start-here-kde",            sh("qdbus", "org.kde.plasmashell", "/PlasmaShell", "activateLauncherMenu")),
+    ("Arrêter",       "system-shutdown",           ksm(2)),
+    ("Redémarrer",    "system-reboot",             ksm(1)),
+    ("Veille",        "system-suspend",            sh("systemctl", "suspend")),
+    ("Hibernation",   "system-suspend-hibernate",  sh("systemctl", "hibernate")),
+    ("Verrouiller",   "system-lock-screen",        sh("loginctl", "lock-session")),
+    ("Déconnexion",   "system-log-out",            ksm(0)),
+    ("Micro",         "microphone-sensitivity-high", sh("wpctl", "set-mute", "@DEFAULT_AUDIO_SOURCE@", "0")),
+    ("Micro coupé",   "microphone-sensitivity-muted", sh("wpctl", "set-mute", "@DEFAULT_AUDIO_SOURCE@", "1")),
+    ("Volume",        "audio-volume-high",         sh("wpctl", "set-mute", "@DEFAULT_AUDIO_SINK@", "0")),
+    ("Muet",          "audio-volume-muted",        sh("wpctl", "set-mute", "@DEFAULT_AUDIO_SINK@", "1")),
+    ("Wi-Fi",         "network-wireless",          kcm("kcm_networkmanagement")),
+    ("Bluetooth",     "preferences-system-bluetooth", kcm("kcm_bluetooth")),
+    ("Batterie",      "battery",                   kcm("kcm_powerdevilprofilesconfig")),
+    ("Luminosité",    "display-brightness",        kcm("kcm_powerdevilprofilesconfig")),
+    ("Paramètres",    "systemsettings",            sh("systemsettings")),
+    ("Fichiers",      "system-file-manager",       sh("dolphin")),
+    ("Document",      "accessories-text-editor",   opener("kate", "kwrite")),
+    ("Corbeille",     "user-trash",                sh("dolphin", "trash:/")),
+    ("Terminal",      "utilities-terminal",        sh("konsole")),
+    ("Navigateur",    "web-browser",               opener("firefox-esr", "firefox", "xdg-open", args=())),
+    ("Mail",          "internet-mail",             sh("xdg-email")),
+    ("Calendrier",    "office-calendar",           kcm("kcm_clock")),
+    ("Horloge",       "clock",                     kcm("kcm_clock")),
+    ("Caméra",        "camera-web",                opener("cheese", "kamoso")),
+    ("Images",        "org.kde.gwenview",          opener("gwenview", args=(HOME + "/Images",))),
+    ("Musique",       "multimedia-audio-player",   opener("elisa", "vlc")),
+    ("Recherche",     "system-search",             sh("qdbus", "org.kde.krunner", "/App", "display")),
+    ("Notifications", "preferences-desktop-notification", kcm("kcm_notifications")),
+    ("Sécurité",      "security-high",             kcm("kcm_users")),
+    ("Téléchargement","folder-download",           sh("dolphin", dl)),
+    ("Imprimante",    "printer",                   kcm("kcm_printer_manager") if shutil.which("system-config-printer") or os.path.exists("/usr/share/kservices5/kcm_printer_manager.desktop") else None),
+    ("Écran",         "video-display",             kcm("kcm_kscreen")),
+    ("Assistant vocal","audio-input-microphone",   sh("notify-send", "-a", "Noxia", "Noxia", "L'assistant Nox arrive dans une prochaine édition.")),
+    ("Applications",  "applications-all",          sh("qdbus", "org.kde.plasmashell", "/PlasmaShell", "activateLauncherMenu")),
+    ("Mode jeu",      "input-gaming",              opener("nox-gamemode")),
+]
+COLS = 6
+
+class Centre(Gtk.Window):
+    def __init__(self):
+        super().__init__(title="Nox Centre")
+        self.set_default_size(960, 640)
+        self.set_position(Gtk.WindowPosition.CENTER)
+        self.set_icon_name("nox-centre")
+        prov = Gtk.CssProvider(); prov.load_from_data(CSS)
+        Gtk.StyleContext.add_provider_for_screen(Gdk.Screen.get_default(), prov, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
+
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6, margin=24)
+        head = Gtk.Box(spacing=12)
+        Gtk.Settings.get_default().set_property("gtk-icon-theme-name", "nox")
+        Gtk.Settings.get_default().set_property("gtk-application-prefer-dark-theme", True)
+        logo = Gtk.Image()
+        if os.path.exists("/usr/share/nox/logo.png"):
+            logo.set_from_pixbuf(GdkPixbuf.Pixbuf.new_from_file_at_scale("/usr/share/nox/logo.png", 44, 44, True))
+        t = Gtk.Label(label="Nox Centre", xalign=0); t.get_style_context().add_class("title")
+        s = Gtk.Label(label="Alimentation, son, réseau, applications", xalign=0); s.get_style_context().add_class("sub")
+        tb = Gtk.Box(orientation=Gtk.Orientation.VERTICAL); tb.pack_start(t, False, False, 0); tb.pack_start(s, False, False, 0)
+        head.pack_start(logo, False, False, 0); head.pack_start(tb, False, False, 0)
+        box.pack_start(head, False, False, 0)
+
+        grid = Gtk.Grid(column_spacing=12, row_spacing=12, column_homogeneous=True, row_homogeneous=True, margin_top=14)
+        for i, (label, icon, action) in enumerate(TILES):
+            b = Gtk.Button(); b.get_style_context().add_class("tile")
+            inner = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+            img = Gtk.Image.new_from_icon_name(icon, Gtk.IconSize.DIALOG); img.set_pixel_size(36)
+            inner.pack_start(img, True, True, 0)
+            inner.pack_start(Gtk.Label(label=label), False, False, 0)
+            b.add(inner)
+            if action is None:
+                b.set_sensitive(False); b.set_tooltip_text("Non installé")
+            else:
+                b.connect("clicked", lambda _w, a=action: (a(), GLib.timeout_add(150, self.close) if "--stay" not in sys.argv else None))
+            grid.attach(b, i % COLS, i // COLS, 1, 1)
+        box.pack_start(grid, True, True, 0)
+        self.add(box)
+        self.connect("key-press-event", lambda _w, e: self.close() if e.keyval == Gdk.KEY_Escape else None)
+
+win = Centre(); win.connect("destroy", Gtk.main_quit); win.show_all(); Gtk.main()

@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Nox Centre
+Name[fr]=Nox Centre
+Comment=Alimentation, son, réseau et applications Nox OS
+Exec=nox-centre
+Icon=nox-centre
+Categories=System;Settings;
+Keywords=nox;arrêter;redémarrer;volume;wifi;

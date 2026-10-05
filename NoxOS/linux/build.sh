@@ -15,7 +15,10 @@ cp $HERE/assets/sounds/* $R/usr/share/sounds/nox/
 cp $HERE/plymouth/nox/* $R/usr/share/plymouth/themes/nox/
 cp $HERE/sddm/nox/* $R/usr/share/sddm/themes/nox/
 cp $HERE/scripts/nox-firstboot.py $HERE/scripts/nox-firstboot-done $HERE/scripts/nox-session-start  $R/usr/lib/nox/
-cp $HERE/scripts/nox-sound $R/usr/bin/
+cp $HERE/scripts/nox-sound $HERE/apps/nox-centre $HERE/apps/nox-gamemode $R/usr/bin/
+cp $HERE/applications/*.desktop $R/usr/share/applications/
+mkdir -p $R/usr/share/icons && rm -rf $R/usr/share/icons/nox && cp -r $HERE/icons/nox $R/usr/share/icons/
+cp $HERE/assets/logo.png $R/usr/share/icons/nox/scalable/apps/nox-centre.png 2>/dev/null || true
 cp -r $HERE/etc/sddm.conf.d $R/etc/
 install -m 440 $HERE/etc/sudoers.d/nox-firstboot $R/etc/sudoers.d/
 cp -r $HERE/skel/. $R/etc/skel/
@@ -65,6 +68,9 @@ ln -sf /usr/share/zoneinfo/Europe/Paris /etc/localtime; echo Europe/Paris > /etc
 rm -rf /etc/xdg/autostart/org.kde.*ksplash* 2>/dev/null; true
 echo 'KEYMAP=fr' > /etc/vconsole.conf
 printf 'XKBMODEL="pc105"\nXKBLAYOUT="fr"\nXKBVARIANT=""\nXKBOPTIONS=""\n' > /etc/default/keyboard
+apt-get install -y -qq librsvg2-common >/dev/null 2>&1 || true
+gtk-update-icon-cache -f -q /usr/share/icons/nox 2>/dev/null || true
+update-desktop-database -q 2>/dev/null || true
 apt-get clean
 EOC
 # live-config ne doit pas recreer un autre utilisateur
