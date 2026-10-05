@@ -1,0 +1,1 @@
+nox ALL=(root) NOPASSWD: /usr/bin/chpasswd, /usr/lib/nox/nox-firstboot-done
