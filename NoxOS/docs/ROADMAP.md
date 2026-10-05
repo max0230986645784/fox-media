@@ -81,6 +81,8 @@ gestionnaire de paquets, Nox Studio, SDK, installation, stabilisation.
 | Nox Nova | explorateur, applications, gestionnaire des tâches |
 | Nox Guardian | comptes, permissions, écriture disque |
 | Nox Beta | réseau, Internet, connexion Discord (QR code), **Nox Navigateur** |
+
+Connexion : **Discord uniquement** (OAuth2 officiel + QR code, pas de bot Discord, pas de Google), session persistante avec jeton chiffré localement ; sécurité par défaut pour les utilisateurs comme pour l'équipe.
 | Nox Ultimate | avant-dernière : stabilisation, installation, **clé USB bootable** |
 | Nox OS | version finale publique |
 

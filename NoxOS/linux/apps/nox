@@ -1,0 +1,63 @@
+#!/bin/sh
+# nox : commandes personnalisees Nox OS.
+V="/etc/nox-release"
+usage() {
+cat <<'U'
+Nox OS - commandes :
+  nox info          Edition, version, machine, memoire, disque
+  nox son <nom>     Jouer un son Nox (boot, error, notification, login...)
+  nox sons          Lister les sons
+  nox centre        Ouvrir le Nox Centre
+  nox jeu           Activer/desactiver le Mode Jeu
+  nox fond <image>  Changer le fond d'ecran
+  nox maj           Mettre a jour Nox OS
+  nox installer <p> Installer un logiciel (ex: nox installer steam)
+  nox nettoyer      Vider caches et corbeille
+  nox pilotes       Lister le materiel (GPU, son, reseau)
+  nox reseau        Etat du reseau / Wi-Fi
+  nox capture       Capture d'ecran
+  nox verrouiller | veille | redemarrer | arreter
+  nox logo          Afficher le logo Nox
+U
+}
+logo() {
+cat <<'L'
+  _   _  _____  __   __    ____   _____
+ | \ | ||  _  | \ \ / /   / __ \ / ____|
+ |  \| || | | |  \ V /   | |  | | (___
+ | . ` || | | |   > <    | |  | |\___ \
+ | |\  || |_| |  / . \   | |__| |____) |
+ |_| \_||_____| /_/ \_\   \____/|_____/
+L
+}
+case "$1" in
+  info)
+    logo
+    [ -f "$V" ] && cat "$V" || echo "Nox OS"
+    echo "Noyau     : $(uname -r)"
+    echo "Machine   : $(hostname)  ($(nproc) coeurs, $(uname -m))"
+    echo "Processeur: $(grep -m1 'model name' /proc/cpuinfo | cut -d: -f2 | sed 's/^ //')"
+    echo "Memoire   : $(free -h | awk '/Mem:/{print $3" / "$2}')"
+    echo "Disque    : $(df -h / | awk 'NR==2{print $3" / "$2" ("$5")"}')"
+    echo "Session   : $(date '+%H:%M, %d/%m/%Y')  actif depuis $(uptime -p | sed 's/up //')"
+    ;;
+  son) [ -n "$2" ] || { echo "Usage : nox son <nom>  (nox sons pour la liste)"; exit 1; }; nox-sound "$2" ;;
+  sons) ls /usr/share/sounds/nox | sed 's/\.oga$//' | column -c 70 ;;
+  centre) nohup nox-centre >/dev/null 2>&1 & ;;
+  jeu) nohup nox-gamemode >/dev/null 2>&1 & echo "Mode Jeu : icone dans la zone systeme." ;;
+  fond) [ -f "$2" ] || { echo "Usage : nox fond <image>"; exit 1; }
+    plasma-apply-wallpaperimage "$(realpath "$2")" ;;
+  maj) sudo apt update && sudo apt full-upgrade -y ;;
+  installer) shift; [ -n "$1" ] || { echo "Usage : nox installer <paquet>"; exit 1; }; sudo apt install -y "$@" ;;
+  nettoyer) sudo apt autoremove -y; sudo apt clean; rm -rf ~/.cache/thumbnails ~/.local/share/Trash/files/* ~/.local/share/Trash/info/* 2>/dev/null; echo "Nettoyage termine." ;;
+  pilotes) lspci | grep -iE 'vga|3d|audio|network|ethernet|wireless' ;;
+  reseau) nmcli -c yes device status; echo; nmcli -c yes -f SSID,SIGNAL,SECURITY dev wifi list 2>/dev/null | head -10 ;;
+  capture) f=~/Images/capture-$(date +%Y%m%d-%H%M%S).png; mkdir -p ~/Images; (spectacle -b -o "$f" 2>/dev/null || import -window root "$f") && nox-sound screenshot && echo "Capture : $f" ;;
+  verrouiller) loginctl lock-session ;;
+  veille) systemctl suspend ;;
+  redemarrer) systemctl reboot ;;
+  arreter) systemctl poweroff ;;
+  logo) logo ;;
+  ""|-h|--help|aide) usage ;;
+  *) echo "nox : commande inconnue « $1 » (nox aide)"; nox-sound error 2>/dev/null; exit 1 ;;
+esac

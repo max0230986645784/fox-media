@@ -4,6 +4,6 @@ Name=Nox Centre
 Name[fr]=Nox Centre
 Comment=Alimentation, son, réseau et applications Nox OS
 Exec=nox-centre
-Icon=nox-centre
+Icon=/usr/share/nox/logo.png
 Categories=System;Settings;
 Keywords=nox;arrêter;redémarrer;volume;wifi;

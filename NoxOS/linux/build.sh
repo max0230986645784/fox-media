@@ -18,13 +18,15 @@ cp $HERE/scripts/nox-firstboot.py $HERE/scripts/nox-firstboot-done $HERE/scripts
 cp $HERE/scripts/nox-sound $HERE/apps/nox-centre $HERE/apps/nox-gamemode $R/usr/bin/
 cp $HERE/applications/*.desktop $R/usr/share/applications/
 mkdir -p $R/usr/share/icons && rm -rf $R/usr/share/icons/nox && cp -r $HERE/icons/nox $R/usr/share/icons/
-cp $HERE/assets/logo.png $R/usr/share/icons/nox/scalable/apps/nox-centre.png 2>/dev/null || true
 cp -r $HERE/etc/sddm.conf.d $R/etc/
 install -m 440 $HERE/etc/sudoers.d/nox-firstboot $R/etc/sudoers.d/
 cp -r $HERE/skel/. $R/etc/skel/
 mkdir -p $R/usr/share/plasma/look-and-feel && cp -r $HERE/lookandfeel/org.nox.desktop $R/usr/share/plasma/look-and-feel/
 cp $HERE/scripts/nox-desktop-apply $R/usr/lib/nox/
 mkdir -p $R/usr/share/plasma/plasmoids && cp -r $HERE/plasmoids/. $R/usr/share/plasma/plasmoids/
+rm -rf $R/usr/share/plasma/plasmoids/org.kde.plasma.kickerdash/contents/ui && cp -r $HERE/plasmoids/org.kde.plasma.kicker/contents/ui $R/usr/share/plasma/plasmoids/org.kde.plasma.kickerdash/contents/ui
+install -m 644 $HERE/etc/X11/Xsession.d/40nox-session $R/etc/X11/Xsession.d/
+cp $HERE/apps/nox $R/usr/bin/ && chmod 755 $R/usr/bin/nox
 python3 - $R/usr/share/plasma/wallpapers/org.kde.image/contents/config/main.xml <<'PYX'
 import sys, re
 p = sys.argv[1]; s = open(p).read()
@@ -47,6 +49,7 @@ EOR
 echo noxos > $R/etc/hostname
 printf '127.0.0.1\tlocalhost\n127.0.1.1\tnoxos\n' > $R/etc/hosts
 echo "Nox OS" > $R/etc/issue
+printf "Nox OS\nEdition   : Nox Aurora (prototype Linux)\nVersion   : 0.4\n" > $R/etc/nox-release
 
 chroot $R /bin/bash -e <<'EOC'
 export DEBIAN_FRONTEND=noninteractive
@@ -85,7 +88,8 @@ EOL
 echo "== squashfs"
 mkdir -p $W/live $W/boot/grub $W/EFI/boot
 if [ -n "${NOX_SQUASHFS:-}" ]; then cp "$NOX_SQUASHFS" $W/live/filesystem.squashfs; else
-mksquashfs $R $W/live/filesystem.squashfs -comp xz -b 1M -noappend -wildcards \
+if [ -n "${NOX_FAST:-}" ]; then COMP="-comp zstd -Xcompression-level 3"; else COMP="-comp xz -b 1M"; fi
+mksquashfs $R $W/live/filesystem.squashfs $COMP -noappend -wildcards \
     -e 'proc/*' 'sys/*' 'dev/*' 'run/*' 'tmp/*' 'var/cache/apt/archives/*.deb' >/dev/null
 fi
 cp $R/boot/vmlinuz-* $W/live/vmlinuz

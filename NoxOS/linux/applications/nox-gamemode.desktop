@@ -3,5 +3,5 @@ Type=Application
 Name=Nox Mode Jeu
 Comment=Priorité au jeu : CPU/GPU, notifications coupées, écran toujours allumé
 Exec=nox-gamemode
-Icon=nox-gamemode
+Icon=/usr/share/nox/logo.png
 Categories=Game;System;

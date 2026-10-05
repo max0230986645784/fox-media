@@ -1,0 +1,15 @@
+# Nox OS : profil Plasma Nox garanti (barre, menu, theme) et 1080p minimum.
+if [ ! -f "$HOME/.config/plasma-org.kde.plasma.desktop-appletsrc" ]; then
+    mkdir -p "$HOME/.config"
+    cp -rn /etc/skel/. "$HOME"/ 2>/dev/null || true
+fi
+if command -v xrandr >/dev/null 2>&1; then
+    _out=$(xrandr 2>/dev/null | awk '/ connected/{print $1; exit}')
+    _cur=$(xrandr 2>/dev/null | awk '/\*/{print $1; exit}')
+    case "$_cur" in
+        640x*|800x*|1024x*|1280x*|1366x*|1440x*|1600x*)
+            if xrandr 2>/dev/null | grep -q '^ *1920x1080'; then
+                xrandr --output "$_out" --mode 1920x1080 2>/dev/null || true
+            fi ;;
+    esac
+fi
