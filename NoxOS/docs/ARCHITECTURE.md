@@ -1,4 +1,4 @@
-# NoxOS v0.2 — Architecture et fonctionnement
+# NoxOS v0.3 — Architecture et fonctionnement
 
 Ce document explique **ce qui se passe réellement** entre l'allumage de la
 machine et l'apparition du prompt `nox>`. Rien n'est simulé : chaque étape
@@ -136,9 +136,10 @@ Trois couches, de la plus physique à la plus pratique :
 ### Threads et ordonnanceur (v0.2)
 
 - `struct thread` (`include/nox/thread.h`) : `esp` sauvegardé, id, état
-  (`READY / RUNNING / SLEEPING / ZOMBIE`), nom, pile de 16 Ko allouée par
-  `kmalloc`. Tous les threads sont en **ring 0** et partagent l'espace
-  d'adressage du kernel : les vrais processus utilisateur arrivent en v0.3.
+  (`READY / RUNNING / SLEEPING / ZOMBIE`), nom, pile kernel de 16 Ko allouée
+  par `kmalloc`, et depuis la v0.3 un pointeur `proc` (NULL pour un thread
+  kernel pur) : le thread d'un processus tourne en ring 3 dans l'espace
+  d'adressage du processus.
 - `switch_context(prev, next)` (`arch/x86/switch.asm`) sauve `ebp ebx esi
   edi` sur la pile courante, mémorise `esp` dans `prev`, charge `esp` de
   `next`, restaure les registres et `ret`. Un thread neuf reçoit une pile
@@ -156,6 +157,71 @@ Trois couches, de la plus physique à la plus pratique :
 - Commandes : `ps` liste les threads, `spawn N` crée N threads de démo qui
   affichent 3 messages en dormant entre chaque, pendant que le shell reste
   utilisable.
+
+### Disque et NoxFS (v0.3)
+
+- `drivers/ata.c` : ATA PIO sur le bus primaire (ports 0x1F0-0x1F7),
+  LBA28, commandes IDENTIFY / READ / WRITE SECTORS / CACHE FLUSH, attente
+  par scrutation du registre de statut. Pas de DMA ni d'interruption : simple
+  et suffisant pour QEMU et un vrai disque IDE/SATA en mode legacy.
+- `fs/noxfs.c` + `include/nox/noxfs.h` : NoxFS est un système de fichiers
+  conçu pour NoxOS, volontairement simple :
+  ```
+  bloc 0       superbloc (magic "NOXF", taille de bloc 4096, label)
+  bloc 1       bitmap des blocs
+  blocs 2..5   table de 256 entrées de 64 octets (nom, taille, bloc de
+               départ, type fichier/dossier, parent, mode, owner)
+  blocs 6..    données ; chaque fichier est CONTIGU
+  ```
+  L'arborescence est donnée par le champ `parent` de chaque entrée (entrée 0
+  = racine). Le kernel lit (`fs_lookup`, `fs_read`, `fs_load`) ; l'écriture
+  kernel arrive en v0.6. L'image est produite sur la machine hôte par
+  `tools/mknoxfs` à partir de `rootfs/` + des programmes compilés, et placée
+  à 1 Mo dans `noxos.img` (LBA 2048), après le bootloader et le kernel.
+
+### Processus utilisateur, ring 3 et appels système (v0.3)
+
+- **GDT + TSS** (`arch/x86/gdt.c`) : segments code/data ring 3 (sélecteurs
+  `0x1B` / `0x23`) et un TSS 32 bits dont on n'utilise que `esp0`/`ss0` : c'est
+  la pile que le CPU adopte quand une interruption ou `int 0x80` survient en
+  ring 3. L'ordonnanceur y écrit la pile kernel du thread élu à chaque
+  changement de contexte (`tss_set_kernel_stack`).
+- **Espace d'adressage** (`mm/paging.c`) : un répertoire de pages par
+  processus (`paging_create_directory`). Les 1024 entrées couvrant le kernel
+  (identity map bas + tas `0xD0000000`) sont copiées depuis le répertoire
+  kernel : les mêmes tables sont partagées, donc tout ce que le kernel mappe
+  est visible dans tous les processus (les tables du tas sont pré-allouées à
+  l'init pour que cette copie reste valable). La zone `0x40000000-0x80000000`
+  est privée : image du programme à `USER_BASE`, pile de 64 Ko sous
+  `USER_STACK_TOP`, pages marquées `PTE_USER`. `schedule()` charge le CR3 du
+  processus élu (`paging_switch`).
+- **Chargement** (`proc/process.c`) : `process_spawn(path)` lit le binaire
+  plat depuis NoxFS, alloue et copie les pages, crée un thread kernel dont la
+  fonction se contente d'appeler `enter_user_mode(eip, esp)`
+  (`arch/x86/user_enter.asm`) : on empile `ss esp eflags(IF=1) cs eip` avec
+  des sélecteurs ring 3 et `iret` fait la transition. Le programme est
+  ensuite préempté par le timer comme n'importe quel thread.
+- **Appels système** (`proc/syscall.c`, `include/nox/syscall.h`) : porte IDT
+  `0x80` avec DPL 3 (`0xEE`) ; `eax` = numéro, `ebx ecx edx` = arguments,
+  résultat dans `eax`. Le stub `isr128` réutilise `isr_common` ; la structure
+  `registers` a gagné `useresp`/`ss` que le CPU pousse en venant du ring 3.
+  Tout pointeur utilisateur est vérifié par `user_range_ok()` (dans
+  `[USER_BASE, USER_STACK_TOP)` ET mappé dans le répertoire du processus)
+  avant d'être touché : un programme ne peut pas faire lire/écrire le kernel
+  à sa place. Appels v0.3 : `exit write read getpid yield sleep uptime`.
+- **Isolation** : une exception dont `cs` a RPL 3 (page fault, GPF sur `cli`
+  ou `in`, opcode invalide...) est routée vers `process_fault()` qui affiche
+  un diagnostic et appelle `process_exit(-1)`. Celui-ci repasse sur le
+  répertoire kernel, libère toutes les pages/tables/répertoire du processus
+  (`paging_destroy_directory`) et termine le thread. Le shell récupère le code
+  de sortie (`process_wait`, ou `process_collect` avant chaque prompt pour les
+  processus lancés avec `&`). Le test `frames` avant/après vérifie qu'aucune
+  frame ne fuit.
+- **Userland** (`user/`) : `crt0.asm` (`_start` → `main` → `exit`),
+  `libnox` (`nox.c` : enveloppes `int 0x80`, `puts`, `putu`, `readline`),
+  programmes dans `user/bin/*.c` liés à `0x40000000` par `user.ld` ; le
+  `.bss` est inclus dans le binaire plat (zéros) pour que taille du fichier =
+  mémoire à mapper. Ce sont les premières briques de ce qui deviendra le SDK.
 
 ### Console
 
@@ -181,8 +247,10 @@ la série : c'est ce qui rend les tests automatiques possibles.
 Carte **virtuelle** après `paging_init()` :
 
 ```
-0x00000000-fin RAM   identity map (virtuel = physique)
-0xD0000000-0xE0000000 tas kernel (pages mappées à la demande)
+0x00000000-fin RAM    identity map (virtuel = physique), kernel seulement (pas PTE_USER)
+0x40000000-...        image du processus courant (privée, ring 3)
+...-0x80000000        pile du processus courant (64 Ko, privée, ring 3)
+0xD0000000-0xE0000000 tas kernel (pages mappées à la demande, tables partagées)
 ```
 
 ## 5. Décisions importantes
@@ -194,9 +262,14 @@ Carte **virtuelle** après `paging_init()` :
   kernel après le passage en mode protégé (le BIOS ne peut charger qu'en
   dessous de 1 Mo). Depuis la v0.2 le tas et les piles des threads sont dans
   les frames au-dessus de 1 Mo, donc la seule limite restante est la taille
-  du binaire kernel (~500 Ko). Un « higher-half kernel » (kernel remappé en
-  haut de l'espace virtuel) sera fait quand les processus utilisateur auront
-  besoin de l'espace bas (v0.3).
+  du binaire kernel (~500 Ko). Le userland est placé à `0x40000000`, donc le
+  kernel identity-mappé en bas ne le gêne pas : le « higher-half kernel » n'est
+  pas nécessaire pour le moment.
+- **Binaires plats plutôt qu'ELF pour les programmes (v0.3)** : le loader
+  tient en 30 lignes et se teste facilement. Un loader ELF viendra avec le
+  SDK quand les programmes auront besoin de plusieurs segments/permissions.
+- **Un thread par processus** : suffisant jusqu'au desktop ; les threads
+  utilisateur multiples seront ajoutés quand une application en aura besoin.
 - **Threads kernel avant processus utilisateur** : le changement de contexte,
   la préemption et le sommeil sont testables sans ring 3 ni appels système.
   Les processus (espace d'adressage privé, ring 3) s'appuieront dessus.

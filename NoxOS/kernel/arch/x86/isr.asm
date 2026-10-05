@@ -88,6 +88,8 @@ IRQ 13, 45
 IRQ 14, 46      ; ATA primaire
 IRQ 15, 47      ; ATA secondaire
 
+ISR_NOERR 128   ; int 0x80 : appel systeme (porte DPL 3)
+
 isr_common:
     pusha                       ; eax ecx edx ebx esp ebp esi edi
     mov ax, ds

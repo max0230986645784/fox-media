@@ -17,7 +17,12 @@ struct boot_info {
     u32 e820_count;
     u32 boot_drive;
     u32 kernel_sectors;
-    u32 reserved;
+    u32 fb_addr;        /* framebuffer VBE (0 = mode texte) */
+    u32 fb_width;
+    u32 fb_height;
+    u32 fb_pitch;
+    u32 fb_bpp;
+    u32 pad[4];
     struct e820_entry e820[];
 } __attribute__((packed));
 

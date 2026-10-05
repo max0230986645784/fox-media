@@ -1,0 +1,6 @@
+[Desktop Entry]
+Type=Application
+Name=Nox Desktop
+Exec=/usr/lib/nox/nox-desktop-apply
+X-KDE-autostart-phase=2
+NoDisplay=true

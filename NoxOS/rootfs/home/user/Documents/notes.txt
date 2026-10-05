@@ -1,0 +1,5 @@
+Notes
+-----
+- v0.4 : bureau graphique
+- v0.5 : explorateur, terminal, applications
+- v0.6 : utilisateurs, ecriture NoxFS

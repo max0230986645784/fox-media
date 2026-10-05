@@ -1,0 +1,4 @@
+#!/bin/sh
+# Marque la premiere configuration comme terminee et desactive l'autologin.
+mkdir -p /var/lib/nox && touch /var/lib/nox/firstboot-done
+rm -f /etc/sddm.conf.d/10-nox-firstboot.conf

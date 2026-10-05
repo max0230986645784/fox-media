@@ -1,0 +1,61 @@
+#!/usr/bin/python3
+"""Nox Mode Jeu : bouton dans la zone systeme. Active/desactive GameMode (priorite CPU/GPU au jeu,
+notifications coupees, veille ecran bloquee)."""
+import os, subprocess
+import gi
+gi.require_version("Gtk", "3.0")
+gi.require_version("AyatanaAppIndicator3", "0.1")
+gi.require_version("Notify", "0.7")
+from gi.repository import Gtk, GLib, AyatanaAppIndicator3 as AI, Notify
+
+STATE = os.path.expanduser("~/.config/nox-gamemode")
+ICON_ON, ICON_OFF = "input-gaming", "input-gaming-symbolic"
+
+class GameMode:
+    def __init__(self):
+        Notify.init("Nox Mode Jeu")
+        self.proc = None
+        self.ind = AI.Indicator.new("nox-gamemode", ICON_OFF, AI.IndicatorCategory.APPLICATION_STATUS)
+        self.ind.set_status(AI.IndicatorStatus.ACTIVE)
+        self.ind.set_title("Nox Mode Jeu")
+        menu = Gtk.Menu()
+        self.toggle = Gtk.CheckMenuItem(label="Mode Jeu")
+        self.toggle.connect("toggled", self.on_toggle)
+        menu.append(self.toggle)
+        self.status = Gtk.MenuItem(label="Désactivé"); self.status.set_sensitive(False)
+        menu.append(self.status)
+        menu.append(Gtk.SeparatorMenuItem())
+        q = Gtk.MenuItem(label="Quitter"); q.connect("activate", lambda *_: Gtk.main_quit()); menu.append(q)
+        menu.show_all()
+        self.ind.set_menu(menu)
+        if os.path.exists(STATE):
+            self.toggle.set_active(True)
+
+    def on_toggle(self, item):
+        if item.get_active():
+            self.enable()
+        else:
+            self.disable()
+
+    def enable(self):
+        # gamemoded s'active tant qu'un client est enregistre : on garde un client ouvert.
+        self.proc = subprocess.Popen(["gamemoderun", "sleep", "infinity"])
+        subprocess.call(["qdbus", "org.freedesktop.Notifications", "/org/freedesktop/Notifications",
+                         "org.freedesktop.Notifications.Inhibit", "Nox Mode Jeu", "jeu en cours", "{}"],
+                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        open(STATE, "w").close()
+        self.ind.set_icon_full(ICON_ON, "Mode Jeu activé")
+        self.status.set_label("Activé : priorité au jeu")
+        Notify.Notification.new("Mode Jeu activé", "Priorité CPU/GPU au jeu, notifications coupées.", ICON_ON).show()
+
+    def disable(self):
+        if self.proc:
+            self.proc.terminate(); self.proc = None
+        if os.path.exists(STATE):
+            os.remove(STATE)
+        self.ind.set_icon_full(ICON_OFF, "Mode Jeu désactivé")
+        self.status.set_label("Désactivé")
+        Notify.Notification.new("Mode Jeu désactivé", "Fonctionnement normal.", ICON_OFF).show()
+
+GameMode()
+Gtk.main()

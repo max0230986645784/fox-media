@@ -1,0 +1,52 @@
+Window.SetBackgroundTopColor(0.02, 0.02, 0.04);
+Window.SetBackgroundBottomColor(0.02, 0.02, 0.04);
+
+screen_w = Window.GetWidth();
+screen_h = Window.GetHeight();
+
+logo.image = Image("logo.png");
+logo.sprite = Sprite(logo.image);
+logo.sprite.SetX(screen_w / 2 - logo.image.GetWidth() / 2);
+logo.sprite.SetY(screen_h / 2 - logo.image.GetHeight() / 2 - 40);
+logo.sprite.SetOpacity(1);
+
+# anneau de 8 points qui tourne sous le logo
+dot_count = 8;
+center_x = screen_w / 2;
+center_y = screen_h / 2 + logo.image.GetHeight() / 2 + 50;
+radius = 22;
+for (i = 0; i < dot_count; i++) {
+    dots[i].image = Image("dot.png");
+    dots[i].sprite = Sprite(dots[i].image);
+    a = i * 2 * Math.Pi / dot_count;
+    dots[i].sprite.SetX(center_x + radius * Math.Sin(a) - dots[i].image.GetWidth() / 2);
+    dots[i].sprite.SetY(center_y - radius * Math.Cos(a) - dots[i].image.GetHeight() / 2);
+}
+
+frame = 0;
+fun refresh_callback() {
+    frame++;
+    head = Math.Int(frame / 4) % dot_count;
+    for (i = 0; i < dot_count; i++) {
+        age = (head - i + dot_count) % dot_count;
+        dots[i].sprite.SetOpacity(1 - age * 0.12);
+    }
+}
+Plymouth.SetRefreshFunction(refresh_callback);
+
+# message et mot de passe (disque chiffre) : texte simple en bas
+message_sprite = Sprite();
+message_sprite.SetPosition(0, screen_h - 60, 10000);
+fun message_callback(text) {
+    img = Image.Text(text, 0.9, 0.9, 0.95);
+    message_sprite.SetImage(img);
+    message_sprite.SetX(screen_w / 2 - img.GetWidth() / 2);
+}
+Plymouth.SetMessageFunction(message_callback);
+Plymouth.SetDisplayNormalFunction(fun() {});
+fun password_callback(prompt, bullets) {
+    s = "";
+    for (i = 0; i < bullets; i++) s += "*";
+    message_callback(prompt + "  " + s);
+}
+Plymouth.SetDisplayPasswordFunction(password_callback);

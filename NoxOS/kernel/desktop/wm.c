@@ -1,0 +1,1442 @@
+/* NoxOS - Nox Desktop : fenetres, compositeur, barre des taches, menu
+ *
+ * Boucle du thread "desktop" (desktop_thread) :
+ *   1. lire les evenements souris/clavier et les router (barre, menu, fenetre
+ *      sous le curseur / fenetre active, deplacement de fenetre en cours) ;
+ *   2. envoyer WM_TICK aux fenetres ~2 fois/s (horloge, gestionnaire) ;
+ *   3. si quelque chose a change, recomposer : fond -> fenetres (ordre Z) ->
+ *      barre des taches -> menu -> curseur, dans un backbuffer, puis copie
+ *      d'un bloc vers le framebuffer (pas de scintillement).
+ *
+ * Style : barre des taches flottante en bas (maquette utilisateur) : logo Nox
+ * (menu) + champ "Rechercher" a gauche, fenetres ouvertes au centre, langue +
+ * horloge a droite. Fenetres a coins arrondis, pastille de fermeture a gauche.
+ */
+#include <nox/wm.h>
+#include <nox/desktop.h>
+#include <nox/lang.h>
+#include <nox/fb.h>
+#include <nox/mouse.h>
+#include <nox/keyboard.h>
+#include <nox/thread.h>
+#include <nox/timer.h>
+#include <nox/rtc.h>
+#include <nox/fs.h>
+#include <nox/memory.h>
+#include <nox/printk.h>
+#include <nox/string.h>
+#include <nox/io.h>
+#include <nox/audio.h>
+
+#define TASKBAR_H     64
+#define DOCK_H        56
+#define DOCK_ICON     40
+#define DOCK_PAD      8
+#define MENU_W        720
+#define SEARCH_W      320
+#define SEARCH_MAX    48
+#define SEARCH_ROWS   8
+#define DBLCLICK_MS   400
+
+static struct surface *screen, *back, *wallpaper;
+static struct window  *windows;             /* tete = arriere-plan */
+static struct window  *focused;
+static bool running, need_redraw;
+static struct desktop_settings settings = { false, false, true, 0, true };
+
+static u32 *logo_px;
+static int  logo_size;
+
+/* deplacement de fenetre */
+static struct window *drag_win;
+static int drag_dx, drag_dy;
+/* double clic */
+static u32 last_click_tick;
+static int last_click_x, last_click_y;
+/* menu */
+static bool menu_open;
+static struct rect menu_rect;
+/* barre des taches : zones cliquables calculees au dessin */
+struct dock_item { struct rect r; enum app_icon icon; struct window *win; };
+static struct dock_item dock_items[24];
+static int dock_count;
+static struct rect dock_rect, search_rect;
+static int hover_x = -1, hover_y = -1;
+/* recherche (apps + fichiers NoxFS) */
+static bool search_open;
+static char search_buf[SEARCH_MAX + 1];
+static int  search_len;
+struct search_result { enum app_icon icon; const char *label; char path[96]; int fs_idx; int action; };
+static struct search_result search_results[SEARCH_ROWS];
+static int  search_count;
+static struct rect search_panel;
+static void recent_push(int action);
+static void load_logo(void);
+
+/* ecran de demarrage, verrouillage et connexion (facon Windows, style Nox) */
+enum screen_state { SCR_SETUP, SCR_SETUP_CONFIRM, SCR_LOCK, SCR_LOGIN, SCR_DESKTOP };
+static enum screen_state scr_state;
+#define PIN_MAX 32
+#define SPLASH_MIN_MS 3000
+static char pin[PIN_MAX + 1], pin_first[PIN_MAX + 1], pin_buf[PIN_MAX + 1];
+static int  pin_len;
+static const char *login_msg;
+static u32  splash_start;
+static bool splash_on;
+
+/* notification + boite d'erreur */
+#define TOAST_MS   6000
+#define MSG_MAX    96
+static char toast_title[MSG_MAX], toast_text[MSG_MAX];
+static u32  toast_until;                    /* tick d'expiration, 0 = aucune */
+static char err_title[MSG_MAX], err_text[MSG_MAX];
+static bool err_open;
+static struct rect err_ok_rect;
+
+/* --------------------------------------------------------------------------
+ * Fenetres
+ * ------------------------------------------------------------------------ */
+struct window *wm_create(const char *title, int x, int y, int w, int h,
+                         enum app_icon icon, wm_paint_fn paint, wm_event_fn event,
+                         void *data)
+{
+    struct window *win = kmalloc(sizeof(*win));
+    if (!win)
+        return NULL;
+    memset(win, 0, sizeof(*win));
+    win->content = surface_create(w, h - WM_TITLE_H);
+    if (!win->content) {
+        kfree(win);
+        return NULL;
+    }
+    win->frame = (struct rect){ x, y, w, h };
+    strncpy(win->title, title, WM_TITLE_MAX - 1);
+    win->icon = icon; win->paint = paint; win->event = event; win->data = data;
+    win->dirty = true;
+
+    /* insertion en queue = premier plan */
+    if (!windows) {
+        windows = win;
+    } else {
+        struct window *t = windows;
+        while (t->next) t = t->next;
+        t->next = win;
+    }
+    focused = win;
+    need_redraw = true;
+    return win;
+}
+
+void wm_destroy(struct window *w)
+{
+    if (!w)
+        return;
+    struct wm_event ev = { .type = WM_CLOSE };
+    if (w->event)
+        w->event(w, &ev);
+    if (windows == w) {
+        windows = w->next;
+    } else {
+        for (struct window *t = windows; t; t = t->next)
+            if (t->next == w) { t->next = w->next; break; }
+    }
+    if (focused == w) {
+        focused = windows;
+        while (focused && focused->next) focused = focused->next;
+    }
+    if (drag_win == w)
+        drag_win = NULL;
+    surface_destroy(w->content);
+    kfree(w);
+    need_redraw = true;
+}
+
+void wm_focus(struct window *w)
+{
+    if (!w || w == focused)
+        return;
+    /* retirer puis remettre en queue */
+    if (windows == w) {
+        windows = w->next;
+    } else {
+        for (struct window *t = windows; t; t = t->next)
+            if (t->next == w) { t->next = w->next; break; }
+    }
+    w->next = NULL;
+    if (!windows) {
+        windows = w;
+    } else {
+        struct window *t = windows;
+        while (t->next) t = t->next;
+        t->next = w;
+    }
+    focused = w;
+    need_redraw = true;
+}
+
+void wm_invalidate(struct window *w)
+{
+    if (w) w->dirty = true;
+    need_redraw = true;
+}
+
+void wm_set_title(struct window *w, const char *title)
+{
+    strncpy(w->title, title, WM_TITLE_MAX - 1);
+    w->title[WM_TITLE_MAX - 1] = '\0';
+    need_redraw = true;
+}
+
+struct window *wm_focused(void) { return focused; }
+struct window *wm_first(void)   { return windows; }
+int wm_screen_w(void) { return screen ? screen->w : 0; }
+int wm_screen_h(void) { return screen ? screen->h : 0; }
+
+struct window *wm_find_icon(enum app_icon icon)
+{
+    for (struct window *t = windows; t; t = t->next)
+        if (t->icon == icon && !t->popup)
+            return t;
+    return NULL;
+}
+
+struct rect wm_workarea(void)
+{
+    struct rect r = { 0, 0, screen->w, screen->h - TASKBAR_H };
+    if (settings.taskbar_top)
+        r.y = TASKBAR_H;
+    return r;
+}
+
+const u32 *wm_logo(int *size)
+{
+    if (size) *size = logo_size;
+    return logo_px;
+}
+
+/* --------------------------------------------------------------------------
+ * Icones vectorielles
+ * ------------------------------------------------------------------------ */
+void wm_draw_icon(struct surface *s, int x, int y, int sz, enum app_icon icon)
+{
+    int r = sz / 5;
+    struct rect box = { x, y, sz, sz };
+    if (icon == ICON_NOX) {
+        if (logo_px)
+            gfx_draw_rgba_scaled(s, x, y, sz, sz, logo_size, logo_size, logo_px);
+        else {
+            gfx_fill_rounded(s, box, r, RGB(40, 44, 60));
+            gfx_text(s, x + sz / 2 - FONT_W, y + sz / 2 - FONT_H / 2, "N", C_TEXT_LIGHT);
+        }
+        return;
+    }
+    if (icon == ICON_EXPLORER || icon == ICON_FOLDER || icon == ICON_HOME ||
+        icon == ICON_IMAGE || icon == ICON_MUSIC || icon == ICON_VIDEO || icon == ICON_DOWNLOAD) {
+        /* dossier : languette + corps */
+        u32 back = RGB(232, 168, 48), front = RGB(250, 200, 80);
+        if (icon == ICON_IMAGE)    { back = RGB(80, 150, 90);   front = RGB(120, 200, 130); }
+        if (icon == ICON_MUSIC)    { back = RGB(180, 80, 140);  front = RGB(220, 120, 180); }
+        if (icon == ICON_VIDEO)    { back = RGB(80, 100, 190);  front = RGB(120, 140, 230); }
+        if (icon == ICON_DOWNLOAD) { back = RGB(70, 150, 170);  front = RGB(110, 190, 210); }
+        if (icon == ICON_HOME)     { back = RGB(90, 130, 200);  front = RGB(130, 170, 240); }
+        gfx_fill_rounded(s, (struct rect){ x, y + sz / 5, sz / 2, sz / 6 }, 2, back);
+        gfx_fill_rounded(s, (struct rect){ x, y + sz / 4, sz, sz * 3 / 5 }, 3, back);
+        gfx_fill_rounded(s, (struct rect){ x, y + sz * 2 / 5, sz, sz * 9 / 20 }, 3, front);
+        return;
+    }
+    switch (icon) {
+    case ICON_TERMINAL:
+        gfx_fill_rounded(s, box, r, RGB(32, 34, 44));
+        gfx_rect(s, box, RGBA(255, 255, 255, 40));
+        gfx_text(s, x + sz / 6, y + sz / 2 - FONT_H / 2, ">_", RGB(120, 240, 140));
+        break;
+    case ICON_SETTINGS: {
+        gfx_fill_rounded(s, box, r, RGB(120, 126, 140));
+        int cx = x + sz / 2, cy = y + sz / 2, rr = sz * 3 / 10;
+        for (int i = 0; i < 8; i++) {
+            /* dents : 8 petits carres autour du cercle */
+            static const int dx[8] = { 0, 7, 10, 7, 0, -7, -10, -7 };
+            static const int dy[8] = { -10, -7, 0, 7, 10, 7, 0, -7 };
+            int px = cx + dx[i] * rr / 10, py = cy + dy[i] * rr / 10;
+            gfx_fill(s, (struct rect){ px - sz / 12, py - sz / 12, sz / 6, sz / 6 }, RGB(240, 240, 245));
+        }
+        gfx_fill_rounded(s, (struct rect){ cx - rr * 3 / 4, cy - rr * 3 / 4, rr * 3 / 2, rr * 3 / 2 }, rr * 3 / 4, RGB(240, 240, 245));
+        gfx_fill_rounded(s, (struct rect){ cx - rr / 3, cy - rr / 3, rr * 2 / 3, rr * 2 / 3 }, rr / 3, RGB(120, 126, 140));
+        break;
+    }
+    case ICON_TASKMGR:
+        gfx_fill_rounded(s, box, r, RGB(60, 110, 200));
+        gfx_fill(s, (struct rect){ x + sz / 6, y + sz / 2, sz / 6, sz / 3 }, RGB(240, 240, 245));
+        gfx_fill(s, (struct rect){ x + sz * 5 / 12, y + sz / 4, sz / 6, sz * 7 / 12 }, RGB(240, 240, 245));
+        gfx_fill(s, (struct rect){ x + sz * 2 / 3, y + sz * 3 / 8, sz / 6, sz * 11 / 24 }, RGB(240, 240, 245));
+        break;
+    case ICON_TEXT:
+    case ICON_FILE:
+        gfx_fill_rounded(s, (struct rect){ x + sz / 8, y, sz * 3 / 4, sz }, 3, RGB(250, 250, 252));
+        gfx_rect(s, (struct rect){ x + sz / 8, y, sz * 3 / 4, sz }, RGBA(0, 0, 0, 60));
+        for (int i = 0; i < 4; i++)
+            gfx_fill(s, (struct rect){ x + sz / 4, y + sz / 4 + i * sz / 6, sz / 2, 2 }, RGB(150, 155, 170));
+        break;
+    case ICON_INFO:
+        gfx_fill_rounded(s, box, sz / 2, C_ACCENT);
+        gfx_text(s, x + sz / 2 - FONT_W / 2, y + sz / 2 - FONT_H / 2, "i", C_TEXT_LIGHT);
+        break;
+    case ICON_POWER:
+        gfx_fill_rounded(s, box, sz / 2, RGB(210, 70, 70));
+        gfx_fill_rounded(s, (struct rect){ x + sz / 4, y + sz / 4, sz / 2, sz / 2 }, sz / 4, RGB(250, 250, 252));
+        gfx_fill_rounded(s, (struct rect){ x + sz / 4 + 3, y + sz / 4 + 3, sz / 2 - 6, sz / 2 - 6 }, sz / 4, RGB(210, 70, 70));
+        gfx_fill(s, (struct rect){ x + sz / 2 - 1, y + sz / 5, 3, sz / 3 }, RGB(250, 250, 252));
+        break;
+    default:
+        gfx_fill_rounded(s, box, r, RGB(120, 120, 130));
+        break;
+    }
+}
+
+void wm_draw_button(struct surface *s, struct rect r, const char *label, bool active)
+{
+    gfx_fill_rounded(s, r, 6, active ? C_ACCENT : RGB(218, 221, 230));
+    int tw = gfx_text_width(label);
+    gfx_text(s, r.x + (r.w - tw) / 2, r.y + (r.h - FONT_H) / 2, label,
+             active ? C_TEXT_LIGHT : C_TEXT);
+}
+
+/* --------------------------------------------------------------------------
+ * Composition
+ * ------------------------------------------------------------------------ */
+/* Fonds d'ecran : images /sys/wallpapers/<nom>.nxi fournies par l'utilisateur.
+ * Si l'image manque (pas de disque), un fond procedural du meme ton est
+ * dessine a la place. */
+static const char *const wallpaper_files[WALLPAPER_COUNT] = {
+    "/sys/wallpapers/nox.nxi", "/sys/wallpapers/neon.nxi", "/sys/wallpapers/anime.nxi",
+};
+
+static struct surface *load_wallpaper_image(int index)
+{
+    if (!fs_mounted() || index < 0 || index >= WALLPAPER_COUNT)
+        return NULL;
+    int idx = fs_lookup(wallpaper_files[index], 0);
+    if (idx < 0)
+        return NULL;
+    u32 size;
+    void *data = fs_load(idx, &size);
+    if (!data)
+        return NULL;
+    struct surface *img = surface_from_nxi(data, size);
+    kfree(data);
+    return img;
+}
+
+/* Dessine l'image mise a l'echelle (plus proche voisin) dans r. */
+static void draw_image_scaled(struct surface *s, struct rect r, const struct surface *img)
+{
+    for (int y = 0; y < r.h; y++) {
+        int sy = y * img->h / r.h;
+        for (int x = 0; x < r.w; x++) {
+            int sx = x * img->w / r.w;
+            gfx_fill(s, (struct rect){ r.x + x, r.y + y, 1, 1 }, img->pixels[sy * img->pitch + sx]);
+        }
+    }
+}
+
+void desktop_paint_wallpaper_preview(struct surface *s, struct rect r, int index)
+{
+    struct surface *img = load_wallpaper_image(index);
+    if (img) {
+        draw_image_scaled(s, r, img);
+        surface_destroy(img);
+        return;
+    }
+    switch (index) {
+    default:
+    case 0:
+        gfx_gradient_v(s, r, RGB(26, 32, 58), RGB(58, 30, 74));
+        for (int i = 6; i >= 1; i--) {
+            int rr = (r.w / 17) + i * (r.w / 36);
+            gfx_fill_rounded(s, (struct rect){ r.x + r.w / 2 - rr, r.y + r.h / 2 - 40 * r.h / 768 - rr, rr * 2, rr * 2 }, rr,
+                             RGBA(120, 90, 200, 10));
+        }
+        break;
+    case 1:
+        gfx_gradient_v(s, (struct rect){ r.x, r.y, r.w, r.h / 2 }, RGB(28, 40, 90), RGB(200, 90, 120));
+        gfx_gradient_v(s, (struct rect){ r.x, r.y + r.h / 2, r.w, r.h - r.h / 2 }, RGB(200, 90, 120), RGB(250, 170, 90));
+        for (int i = 0; i < 5; i++) {
+            int y = r.y + r.h / 5 + i * r.h / 9;
+            gfx_fill_alpha(s, (struct rect){ r.x, y, r.w, r.h / 40 + 1 }, RGBA(255, 220, 200, 22));
+        }
+        break;
+    case 2:
+        gfx_gradient_v(s, r, RGB(10, 30, 28), RGB(30, 90, 60));
+        for (int i = 0; i < 4; i++) {
+            int rr = r.w / 3 + i * r.w / 10;
+            int cx = r.x + (i * 2 + 1) * r.w / 7;
+            gfx_fill_rounded(s, (struct rect){ cx - rr, r.y + r.h * 3 / 4 + i * r.h / 24, rr * 2, rr * 2 }, rr,
+                             RGBA(20, 60 + i * 15, 40 + i * 10, 200));
+        }
+        break;
+    }
+}
+
+static void build_wallpaper(void)
+{
+    struct rect full = { 0, 0, screen->w, screen->h };
+    struct surface *img = load_wallpaper_image(settings.wallpaper);
+    if (img) {
+        if (img->w == screen->w && img->h == screen->h)
+            gfx_copy(wallpaper, 0, 0, img, (struct rect){ 0, 0, img->w, img->h });
+        else
+            draw_image_scaled(wallpaper, full, img);
+        surface_destroy(img);
+        return;                 /* l'image contient deja son identite visuelle */
+    }
+    desktop_paint_wallpaper_preview(wallpaper, full, settings.wallpaper);
+    int cx = screen->w / 2, cy = screen->h / 2 - 40;
+    if (logo_px) {
+        int sz = 200;
+        gfx_fill_rounded(wallpaper, (struct rect){ cx - sz / 2 - 6, cy - sz / 2 - 6, sz + 12, sz + 12 },
+                         40, RGBA(255, 255, 255, 30));
+        gfx_draw_rgba_scaled(wallpaper, cx - sz / 2, cy - sz / 2, sz, sz, logo_size, logo_size, logo_px);
+    }
+    const char *name = "NoxOS";
+    gfx_text(wallpaper, cx - gfx_text_width(name) / 2, cy + 120, name, RGBA(255, 255, 255, 200));
+}
+
+void desktop_set_wallpaper(int index)
+{
+    if (index < 0 || index >= WALLPAPER_COUNT)
+        return;
+    settings.wallpaper = index;
+    build_wallpaper();
+    need_redraw = true;
+}
+
+static void draw_window(struct window *w)
+{
+    struct rect f = w->frame;
+    bool active = (w == focused);
+
+    if (w->popup) {
+        gfx_fill_rounded(back, (struct rect){ f.x + 2, f.y + 4, f.w, f.h }, WM_RADIUS, C_SHADOW);
+        gfx_fill_rounded(back, f, WM_RADIUS, C_WINDOW);
+        gfx_copy(back, f.x, f.y + WM_TITLE_H, w->content, (struct rect){ 0, 0, w->content->w, w->content->h });
+        return;
+    }
+    /* ombre */
+    gfx_fill_rounded(back, (struct rect){ f.x + 3, f.y + 5, f.w, f.h }, WM_RADIUS + 2, C_SHADOW);
+    /* barre de titre */
+    gfx_fill_rounded(back, (struct rect){ f.x, f.y, f.w, WM_TITLE_H + WM_RADIUS }, WM_RADIUS,
+                     active ? C_TITLE : C_TITLE_INACT);
+    /* contenu */
+    gfx_copy(back, f.x, f.y + WM_TITLE_H, w->content, (struct rect){ 0, 0, w->content->w, w->content->h });
+    gfx_hline(back, f.x, f.y + WM_TITLE_H - 1, f.w, RGBA(0, 0, 0, 25));
+    /* pastilles (fermer / reduire / agrandir) */
+    u32 dots[3] = { RGB(255, 95, 87), RGB(255, 189, 46), RGB(40, 201, 64) };
+    for (int i = 0; i < 3; i++) {
+        struct rect d = { f.x + 12 + i * 20, f.y + WM_TITLE_H / 2 - 6, 12, 12 };
+        gfx_fill_rounded(back, d, 6, active ? dots[i] : RGB(200, 200, 205));
+    }
+    /* titre centre, avec son icone */
+    int tw = gfx_text_width(w->title) + 22;
+    int tx = f.x + (f.w - tw) / 2;
+    wm_draw_icon(back, tx, f.y + WM_TITLE_H / 2 - 8, 16, w->icon);
+    gfx_text(back, tx + 22, f.y + (WM_TITLE_H - FONT_H) / 2, w->title, active ? C_TEXT : C_TEXT_DIM);
+    gfx_rect(back, f, C_BORDER);
+}
+
+static void add_dock_item(int x, int y, enum app_icon icon, struct window *win)
+{
+    if (dock_count >= 24)
+        return;
+    dock_items[dock_count++] = (struct dock_item){ { x, y, DOCK_ICON + DOCK_PAD, DOCK_ICON + DOCK_PAD }, icon, win };
+}
+
+static void draw_taskbar(void)
+{
+    dock_count = 0;
+    int open_n = 0;
+    for (struct window *t = windows; t; t = t->next)
+        if (!t->popup) open_n++;
+
+    int step   = DOCK_ICON + DOCK_PAD + 6;
+    int bar_y  = settings.taskbar_top ? 0 : screen->h - TASKBAR_H;
+    int dock_y = bar_y + (TASKBAR_H - DOCK_H) / 2;
+
+    /* pilule gauche : logo (menu) + champ de recherche + fenetres ouvertes */
+    int dock_w = 8 + step + 6 + SEARCH_W + 8 + (open_n ? 6 + open_n * step + 4 : 0) + 4;
+    int dock_x = settings.taskbar_left_align ? 12 : (screen->w - dock_w) / 2;
+    if (!settings.taskbar_left_align && dock_x + dock_w > screen->w - 12 - 170)
+        dock_x = 12;
+    dock_rect = (struct rect){ dock_x, dock_y, dock_w, DOCK_H };
+    gfx_fill_rounded(back, (struct rect){ dock_x + 1, dock_y + 3, dock_w, DOCK_H }, 18, C_SHADOW);
+    gfx_fill_rounded(back, dock_rect, 18, C_PANEL);
+    gfx_rect(back, dock_rect, RGBA(255, 255, 255, 30));
+
+    int x = dock_x + 8, iy = dock_y + (DOCK_H - DOCK_ICON) / 2;
+    /* bouton menu (logo Nox) */
+    {
+        struct rect hit = { x, iy - DOCK_PAD / 2, DOCK_ICON + DOCK_PAD, DOCK_ICON + DOCK_PAD };
+        if (menu_open || rect_contains(hit, hover_x, hover_y))
+            gfx_fill_rounded(back, hit, 12, RGBA(255, 255, 255, 40));
+        wm_draw_icon(back, x + DOCK_PAD / 2, iy, DOCK_ICON, ICON_NOX);
+        add_dock_item(x, iy - DOCK_PAD / 2, ICON_NOX, NULL);
+        x += step + 6;
+    }
+    /* champ de recherche (style Windows) */
+    {
+        search_rect = (struct rect){ x, dock_y + 10, SEARCH_W, DOCK_H - 20 };
+        bool hot = search_open || rect_contains(search_rect, hover_x, hover_y);
+        gfx_fill_rounded(back, search_rect, (DOCK_H - 20) / 2, hot ? RGBA(255, 255, 255, 235) : RGBA(255, 255, 255, 200));
+        if (search_open)
+            gfx_rect(back, search_rect, C_ACCENT);
+        /* loupe : cercle + manche */
+        int cx = search_rect.x + 18, cy = search_rect.y + search_rect.h / 2 - 1;
+        gfx_fill_rounded(back, (struct rect){ cx - 6, cy - 6, 12, 12 }, 6, RGB(70, 74, 90));
+        gfx_fill_rounded(back, (struct rect){ cx - 4, cy - 4, 8, 8 }, 4, hot ? RGB(245, 245, 250) : RGB(230, 232, 240));
+        gfx_fill(back, (struct rect){ cx + 4, cy + 4, 3, 7 }, RGB(70, 74, 90));
+        gfx_fill(back, (struct rect){ cx + 5, cy + 5, 3, 7 }, RGB(70, 74, 90));
+        const char *txt = search_len ? search_buf : L(STR_SEARCH);
+        gfx_text(back, search_rect.x + 34, search_rect.y + (search_rect.h - FONT_H) / 2, txt,
+                 search_len ? C_TEXT : RGB(95, 100, 120));
+        x += SEARCH_W + 8;
+    }
+    /* fenetres ouvertes */
+    if (open_n) {
+        gfx_vline(back, x, dock_y + 12, DOCK_H - 24, RGBA(255, 255, 255, 40));
+        x += 6;
+        for (struct window *t = windows; t; t = t->next) {
+            if (t->popup) continue;
+            struct rect hit = { x, iy - DOCK_PAD / 2, DOCK_ICON + DOCK_PAD, DOCK_ICON + DOCK_PAD };
+            if (t == focused)
+                gfx_fill_rounded(back, hit, 12, RGBA(255, 255, 255, 28));
+            if (rect_contains(hit, hover_x, hover_y))
+                gfx_fill_rounded(back, hit, 12, RGBA(255, 255, 255, 45));
+            wm_draw_icon(back, x + DOCK_PAD / 2 + 3, iy + 3, DOCK_ICON - 6, t->icon);
+            gfx_fill_rounded(back, (struct rect){ x + (DOCK_ICON + DOCK_PAD) / 2 - (t == focused ? 8 : 3),
+                                                  dock_y + DOCK_H - 7, t == focused ? 16 : 6, 3 }, 1,
+                             t == focused ? C_ACCENT : RGBA(255, 255, 255, 140));
+            add_dock_item(x, iy - DOCK_PAD / 2, t->icon, t);
+            x += step;
+        }
+    }
+
+    /* pilule droite : langue, horloge, date */
+    if (settings.show_clock) {
+        struct rtc_time t;
+        rtc_read(&t);
+        char clock[8], date[12];
+        clock[0] = (char)('0' + t.hour / 10); clock[1] = (char)('0' + t.hour % 10); clock[2] = ':';
+        clock[3] = (char)('0' + t.minute / 10); clock[4] = (char)('0' + t.minute % 10); clock[5] = 0;
+        date[0] = (char)('0' + t.day / 10); date[1] = (char)('0' + t.day % 10); date[2] = '/';
+        date[3] = (char)('0' + t.month / 10); date[4] = (char)('0' + t.month % 10); date[5] = '/';
+        utoa(t.year, date + 6, 10);
+        int rw = 158, rx = screen->w - 12 - rw;
+        struct rect rr = { rx, dock_y, rw, DOCK_H };
+        gfx_fill_rounded(back, (struct rect){ rx + 1, dock_y + 3, rw, DOCK_H }, 18, C_SHADOW);
+        gfx_fill_rounded(back, rr, 18, C_PANEL);
+        gfx_rect(back, rr, RGBA(255, 255, 255, 30));
+        const char *lg = lang_get() == LANG_FR ? "FR" : "EN";
+        gfx_fill_rounded(back, (struct rect){ rx + 10, dock_y + 14, 36, DOCK_H - 28 }, 8, RGBA(255, 255, 255, 30));
+        gfx_text(back, rx + 10 + 18 - gfx_text_width(lg) / 2, dock_y + (DOCK_H - FONT_H) / 2, lg, C_TEXT_LIGHT);
+        gfx_vline(back, rx + 56, dock_y + 12, DOCK_H - 24, RGBA(255, 255, 255, 40));
+        int cx = rx + 56 + (rw - 56) / 2;
+        gfx_text(back, cx - gfx_text_width(clock) / 2, dock_y + 10, clock, C_TEXT_LIGHT);
+        gfx_text(back, cx - gfx_text_width(date) / 2, dock_y + 30, date, RGBA(255, 255, 255, 150));
+    }
+}
+
+/* --------------------------------------------------------------------------
+ * Recherche : applications (par nom localise) + fichiers NoxFS (par nom)
+ * ------------------------------------------------------------------------ */
+static char lower(char c) { return (c >= 'A' && c <= 'Z') ? (char)(c + 32) : c; }
+
+static bool match_ci(const char *hay, const char *needle)
+{
+    if (!*needle) return true;
+    for (; *hay; hay++) {
+        const char *h = hay, *n = needle;
+        while (*h && *n && lower(*h) == lower(*n)) { h++; n++; }
+        if (!*n) return true;
+    }
+    return false;
+}
+
+static void search_add(enum app_icon icon, const char *label, int fs_idx, int action)
+{
+    if (search_count >= SEARCH_ROWS) return;
+    struct search_result *r = &search_results[search_count++];
+    r->icon = icon; r->label = label; r->fs_idx = fs_idx; r->action = action; r->path[0] = 0;
+    if (fs_idx >= 0) fs_path_of(fs_idx, r->path, sizeof(r->path));
+}
+
+static void search_fs(int dir, int depth)
+{
+    if (depth > 4 || search_count >= SEARCH_ROWS) return;
+    for (int c = fs_next_child(dir, -1); c >= 0 && search_count < SEARCH_ROWS; c = fs_next_child(dir, c)) {
+        const struct noxfs_entry *e = fs_entry(c);
+        if (!e) continue;
+        if (match_ci(e->name, search_buf))
+            search_add(e->type == NOXFS_DIR ? ICON_FOLDER : ICON_FILE, e->name, c, 0);
+        if (e->type == NOXFS_DIR)
+            search_fs(c, depth + 1);
+    }
+}
+
+static void search_update(void)
+{
+    static const struct { enum str_id label; enum app_icon icon; int action; } apps[] = {
+        { STR_EXPLORER, ICON_EXPLORER, 1 }, { STR_TERMINAL, ICON_TERMINAL, 2 },
+        { STR_SETTINGS, ICON_SETTINGS, 3 }, { STR_TASKMGR, ICON_TASKMGR, 4 },
+        { STR_ABOUT, ICON_INFO, 5 },
+    };
+    search_count = 0;
+    search_buf[search_len] = 0;
+    for (u32 i = 0; i < sizeof(apps) / sizeof(apps[0]); i++)
+        if (match_ci(L(apps[i].label), search_buf))
+            search_add(apps[i].icon, L(apps[i].label), -1, apps[i].action);
+    if (search_len && fs_mounted())
+        search_fs(0, 0);
+}
+
+static void search_open_result(const struct search_result *r)
+{
+    search_open = false;
+    search_len = 0;
+    search_buf[0] = 0;
+    if (r->fs_idx >= 0) {
+        const struct noxfs_entry *e = fs_entry(r->fs_idx);
+        if (e && e->type == NOXFS_DIR) app_open_explorer(r->path);
+        else app_open_text(r->path);
+    } else {
+        recent_push(r->action);
+        switch (r->action) {
+        case 1: app_open_explorer(NULL); break;
+        case 2: app_open_terminal(); break;
+        case 3: app_open_settings(); break;
+        case 4: app_open_taskmgr(); break;
+        case 5: app_open_about(); break;
+        default: break;
+        }
+    }
+    need_redraw = true;
+}
+
+#define SEARCH_ROW_H 44
+
+static void draw_search(void)
+{
+    int w = 420;
+    int h = 16 + FONT_H + 12 + (search_count ? search_count : 1) * SEARCH_ROW_H + 16;
+    int x = search_rect.x - 8;
+    if (x + w > screen->w - 12) x = screen->w - 12 - w;
+    int y = settings.taskbar_top ? TASKBAR_H + 8 : screen->h - TASKBAR_H - 8 - h;
+    search_panel = (struct rect){ x, y, w, h };
+    gfx_fill_rounded(back, (struct rect){ x + 2, y + 4, w, h }, 14, C_SHADOW);
+    gfx_fill_rounded(back, search_panel, 14, RGBA(30, 32, 42, 240));
+    gfx_rect(back, search_panel, RGBA(255, 255, 255, 30));
+    gfx_text(back, x + 16, y + 12, search_len ? L(STR_APPS) : L(STR_SEARCH_HINT), RGBA(255, 255, 255, 140));
+    int ry = y + 12 + FONT_H + 12;
+    if (!search_count) {
+        gfx_text(back, x + 16, ry + (SEARCH_ROW_H - FONT_H) / 2, L(STR_NO_RESULT), RGBA(255, 255, 255, 120));
+        return;
+    }
+    for (int i = 0; i < search_count; i++) {
+        struct search_result *r = &search_results[i];
+        struct rect row = { x + 8, ry, w - 16, SEARCH_ROW_H };
+        if (i == 0 || rect_contains(row, hover_x, hover_y))
+            gfx_fill_rounded(back, row, 8, RGBA(255, 255, 255, i == 0 ? 22 : 35));
+        wm_draw_icon(back, x + 18, ry + 10, 24, r->icon);
+        gfx_text(back, x + 54, ry + (r->fs_idx >= 0 ? 6 : (SEARCH_ROW_H - FONT_H) / 2), r->label, C_TEXT_LIGHT);
+        if (r->fs_idx >= 0)
+            gfx_text(back, x + 54, ry + 6 + FONT_H + 2, r->path, RGBA(255, 255, 255, 120));
+        ry += SEARCH_ROW_H;
+    }
+}
+
+static int search_hit(int mx, int my)
+{
+    int ry = search_panel.y + 12 + FONT_H + 12;
+    for (int i = 0; i < search_count; i++, ry += SEARCH_ROW_H)
+        if (rect_contains((struct rect){ search_panel.x + 8, ry, search_panel.w - 16, SEARCH_ROW_H }, mx, my))
+            return i;
+    return -1;
+}
+
+static void search_key(char c)
+{
+    if (c == 27) { search_open = false; }
+    else if (c == '\n' || c == '\r') { if (search_count) search_open_result(&search_results[0]); }
+    else if (c == 8 || c == 127) { if (search_len) search_len--; search_update(); }
+    else if (c >= 32 && search_len < SEARCH_MAX) { search_buf[search_len++] = c; search_update(); }
+    need_redraw = true;
+}
+
+/* --------------------------------------------------------------------------
+ * Menu Nox (clic sur le logo) : grand panneau facon Windows 11.
+ *   recherche en haut | Recent (gauche) | Recherches rapides + Applications Nox
+ *   (droite) | alimentation en bas. Taper au clavier bascule sur la recherche.
+ * ------------------------------------------------------------------------ */
+struct menu_item { enum str_id label; enum app_icon icon; int action; };
+static const struct menu_item menu_apps[] = {
+    { STR_EXPLORER, ICON_EXPLORER, 1 }, { STR_TERMINAL, ICON_TERMINAL, 2 },
+    { STR_SETTINGS, ICON_SETTINGS, 3 }, { STR_TASKMGR, ICON_TASKMGR, 4 },
+    { STR_ABOUT, ICON_INFO, 5 },
+};
+static const struct menu_item menu_quick[] = {
+    { STR_WALLPAPER, ICON_SETTINGS, 3 }, { STR_TASKBAR, ICON_SETTINGS, 3 },
+    { STR_LANGUAGE, ICON_SETTINGS, 3 }, { STR_PRIVACY, ICON_INFO, 5 },
+};
+#define MENU_APPS   ((int)(sizeof(menu_apps) / sizeof(menu_apps[0])))
+#define MENU_QUICK  ((int)(sizeof(menu_quick) / sizeof(menu_quick[0])))
+#define MENU_H      560
+#define MENU_PAD    24
+#define MENU_ROW    44
+#define MENU_TILE   96
+#define MENU_RECENT 6
+
+/* applications recemment ouvertes (actions 1..5), la plus recente en tete */
+static int recent[MENU_RECENT];
+static int recent_n;
+
+static void recent_push(int action)
+{
+    if (action < 1 || action > MENU_APPS) return;
+    int i = 0;
+    while (i < recent_n && recent[i] != action) i++;
+    if (i == recent_n && recent_n < MENU_RECENT) recent_n++;
+    for (; i > 0; i--) recent[i] = recent[i - 1];
+    recent[0] = action;
+}
+
+static const struct menu_item *menu_app(int action)
+{
+    for (int i = 0; i < MENU_APPS; i++)
+        if (menu_apps[i].action == action) return &menu_apps[i];
+    return NULL;
+}
+
+/* zones cliquables du menu, recalculees a chaque dessin */
+struct menu_hit_zone { struct rect r; int action; };
+static struct menu_hit_zone menu_zones[MENU_RECENT + MENU_QUICK + MENU_APPS + 3];
+static int menu_zone_n;
+static struct rect menu_search_rect;
+
+static void menu_zone(struct rect r, int action)
+{
+    if (menu_zone_n < (int)(sizeof(menu_zones) / sizeof(menu_zones[0])))
+        menu_zones[menu_zone_n++] = (struct menu_hit_zone){ r, action };
+}
+
+static void draw_menu(void)
+{
+    int w = MENU_W, h = MENU_H;
+    if (h > screen->h - TASKBAR_H - 24) h = screen->h - TASKBAR_H - 24;
+    int x = settings.taskbar_left_align ? 12 : (screen->w - w) / 2;
+    int y = settings.taskbar_top ? TASKBAR_H + 8 : screen->h - TASKBAR_H - 8 - h;
+    menu_rect = (struct rect){ x, y, w, h };
+    menu_zone_n = 0;
+
+    gfx_fill_rounded(back, (struct rect){ x + 2, y + 6, w, h }, 18, C_SHADOW);
+    gfx_fill_rounded(back, menu_rect, 18, RGBA(28, 30, 40, 244));
+    gfx_rect(back, menu_rect, RGBA(255, 255, 255, 40));
+
+    /* champ de recherche */
+    menu_search_rect = (struct rect){ x + MENU_PAD, y + MENU_PAD, w - 2 * MENU_PAD, 40 };
+    gfx_fill_rounded(back, menu_search_rect, 20, RGBA(255, 255, 255, 235));
+    int cx = menu_search_rect.x + 20, cy = menu_search_rect.y + 19;
+    gfx_fill_rounded(back, (struct rect){ cx - 6, cy - 6, 12, 12 }, 6, RGB(70, 74, 90));
+    gfx_fill_rounded(back, (struct rect){ cx - 4, cy - 4, 8, 8 }, 4, RGB(245, 245, 250));
+    gfx_fill(back, (struct rect){ cx + 4, cy + 4, 3, 7 }, RGB(70, 74, 90));
+    gfx_text(back, menu_search_rect.x + 38, menu_search_rect.y + (40 - FONT_H) / 2, L(STR_SEARCH_HINT), RGB(95, 100, 120));
+    menu_zone(menu_search_rect, -1);
+
+    int top = y + MENU_PAD + 40 + 24;
+    int bottom = y + h - MENU_PAD - 48;
+    int col_w = (w - 2 * MENU_PAD - 24) / 2;
+
+    /* colonne gauche : Recent */
+    {
+        int lx = x + MENU_PAD;
+        gfx_text(back, lx + 8, top, L(STR_RECENT), RGBA(255, 255, 255, 150));
+        int ry = top + FONT_H + 12;
+        if (!recent_n)
+            gfx_text(back, lx + 8, ry + 8, L(STR_NO_RECENT), RGBA(255, 255, 255, 110));
+        for (int i = 0; i < recent_n && ry + MENU_ROW <= bottom; i++) {
+            const struct menu_item *it = menu_app(recent[i]);
+            if (!it) continue;
+            struct rect row = { lx, ry, col_w, MENU_ROW };
+            if (rect_contains(row, hover_x, hover_y))
+                gfx_fill_rounded(back, row, 10, RGBA(255, 255, 255, 30));
+            wm_draw_icon(back, lx + 10, ry + 10, 24, it->icon);
+            gfx_text(back, lx + 46, ry + (MENU_ROW - FONT_H) / 2, L(it->label), C_TEXT_LIGHT);
+            menu_zone(row, it->action);
+            ry += MENU_ROW;
+        }
+    }
+
+    /* colonne droite : Recherches rapides puis grille d'applications */
+    {
+        int rx = x + MENU_PAD + col_w + 24;
+        gfx_vline(back, rx - 12, top, bottom - top, RGBA(255, 255, 255, 30));
+        gfx_text(back, rx + 8, top, L(STR_QUICK), RGBA(255, 255, 255, 150));
+        int ry = top + FONT_H + 12;
+        for (int i = 0; i < MENU_QUICK; i++) {
+            struct rect row = { rx, ry, col_w, 36 };
+            if (rect_contains(row, hover_x, hover_y))
+                gfx_fill_rounded(back, row, 10, RGBA(255, 255, 255, 30));
+            gfx_fill_rounded(back, (struct rect){ rx + 12, ry + 14, 8, 8 }, 4, C_ACCENT);
+            gfx_text(back, rx + 32, ry + (36 - FONT_H) / 2, L(menu_quick[i].label), C_TEXT_LIGHT);
+            menu_zone(row, menu_quick[i].action);
+            ry += 36;
+        }
+        ry += 16;
+        gfx_text(back, rx + 8, ry, L(STR_TOP_APPS), RGBA(255, 255, 255, 150));
+        ry += FONT_H + 12;
+        int per_row = col_w / MENU_TILE; if (per_row < 1) per_row = 1;
+        for (int i = 0; i < MENU_APPS; i++) {
+            int tx = rx + (i % per_row) * MENU_TILE, ty = ry + (i / per_row) * MENU_TILE;
+            if (ty + MENU_TILE > bottom) break;
+            struct rect tile = { tx, ty, MENU_TILE - 8, MENU_TILE - 8 };
+            if (rect_contains(tile, hover_x, hover_y))
+                gfx_fill_rounded(back, tile, 12, RGBA(255, 255, 255, 30));
+            wm_draw_icon(back, tx + (MENU_TILE - 8 - 40) / 2, ty + 12, 40, menu_apps[i].icon);
+            const char *lbl = L(menu_apps[i].label);
+            int tw = gfx_text_width(lbl);
+            if (tw > MENU_TILE - 12) tw = MENU_TILE - 12;
+            gfx_text(back, tx + (MENU_TILE - 8 - tw) / 2, ty + 60, lbl, C_TEXT_LIGHT);
+            menu_zone(tile, menu_apps[i].action);
+        }
+    }
+
+    /* pied : logo + nom, boutons redemarrer / arreter */
+    {
+        int fy = y + h - MENU_PAD - 40;
+        gfx_hline(back, x + MENU_PAD, fy - 12, w - 2 * MENU_PAD, RGBA(255, 255, 255, 30));
+        wm_draw_icon(back, x + MENU_PAD + 4, fy + 4, 32, ICON_NOX);
+        gfx_text(back, x + MENU_PAD + 46, fy + (40 - FONT_H) / 2, "NoxOS", C_TEXT_LIGHT);
+        const char *lbls[2] = { L(STR_REBOOT), L(STR_SHUTDOWN) };
+        int acts[2] = { 6, 7 };
+        int bx = x + w - MENU_PAD;
+        for (int i = 1; i >= 0; i--) {
+            int bw = gfx_text_width(lbls[i]) + 52;
+            bx -= bw;
+            struct rect b = { bx, fy, bw, 40 };
+            gfx_fill_rounded(back, b, 12, rect_contains(b, hover_x, hover_y) ? RGBA(255, 255, 255, 45) : RGBA(255, 255, 255, 18));
+            wm_draw_icon(back, bx + 10, fy + 10, 20, ICON_POWER);
+            gfx_text(back, bx + 38, fy + (40 - FONT_H) / 2, lbls[i], C_TEXT_LIGHT);
+            menu_zone(b, acts[i]);
+            bx -= 10;
+        }
+    }
+}
+
+static int menu_hit(int mx, int my)
+{
+    for (int i = 0; i < menu_zone_n; i++)
+        if (rect_contains(menu_zones[i].r, mx, my))
+            return menu_zones[i].action;
+    return 0;
+}
+
+static void draw_cursor(int mx, int my)
+{
+    /* fleche 12x19 : 1 = noir, 2 = blanc */
+    static const char *shape[19] = {
+        "1...........", "11..........", "121.........", "1221........", "12221.......",
+        "122221......", "1222221.....", "12222221....", "122222221...", "1222222221..",
+        "12222222221.", "122222111111", "1222221.....", "122221......", "12211.......",
+        "1211........", "11.1........", "1...........", "............",
+    };
+    for (int y = 0; y < 19; y++)
+        for (int x = 0; x < 12; x++) {
+            char c = shape[y][x];
+            if (c == '.') continue;
+            gfx_fill(back, (struct rect){ mx + x, my + y, 1, 1 }, c == '1' ? RGB(0, 0, 0) : RGB(255, 255, 255));
+        }
+}
+
+static void draw_logo_centered(struct surface *s, int cx, int cy, int size)
+{
+    if (logo_px)
+        gfx_draw_rgba_scaled(s, cx - size / 2, cy - size / 2, size, size, logo_size, logo_size, logo_px);
+    else
+        gfx_text_scaled(s, cx - FONT_W * 3 * 3 / 2, cy - FONT_H * 3 / 2, 3, "NOX", C_TEXT_LIGHT);
+}
+
+/* 6 points sur un cercle, l'un apres l'autre s'eclaire (facon anneau Windows) */
+static void draw_spinner(struct surface *s, int cx, int cy, u32 ms)
+{
+    static const int dx[8] = { 0, 12, 17, 12, 0, -12, -17, -12 };
+    static const int dy[8] = { -17, -12, 0, 12, 17, 12, 0, -12 };
+    int head = (int)((ms / 90) % 8);
+    gfx_fill(s, (struct rect){ cx - 24, cy - 24, 48, 48 }, RGB(0, 0, 0));
+    for (int i = 0; i < 8; i++) {
+        int age = (head - i + 8) % 8;
+        int a = 255 - age * 30;
+        gfx_fill_rounded(s, (struct rect){ cx + dx[i] - 3, cy + dy[i] - 3, 6, 6 }, 3, RGBA(240, 240, 245, a));
+    }
+}
+
+void desktop_splash_begin(void)
+{
+    struct surface *s = fb_surface();
+    if (!s)
+        return;
+    screen = s;
+    if (!logo_px)
+        load_logo();
+    gfx_fill(s, (struct rect){ 0, 0, s->w, s->h }, RGB(0, 0, 0));
+    draw_logo_centered(s, s->w / 2, s->h / 2 - 40, s->h / 5);
+    draw_spinner(s, s->w / 2, s->h / 2 + s->h / 10 + 40, 0);
+    splash_start = timer_ticks();
+    splash_on = true;
+}
+
+void desktop_splash_end(void)
+{
+    struct surface *s = fb_surface();
+    if (!s || !splash_on)
+        return;
+    splash_on = false;
+    for (;;) {
+        u32 ms = (timer_ticks() - splash_start) * (1000 / TIMER_HZ);
+        draw_spinner(s, s->w / 2, s->h / 2 + s->h / 10 + 40, ms);
+        if (ms >= SPLASH_MIN_MS)
+            break;
+        thread_sleep_ms(30);
+    }
+}
+
+static void fmt_clock(char *clock, char *date)
+{
+    struct rtc_time t;
+    rtc_read(&t);
+    clock[0] = (char)('0' + t.hour / 10); clock[1] = (char)('0' + t.hour % 10); clock[2] = ':';
+    clock[3] = (char)('0' + t.minute / 10); clock[4] = (char)('0' + t.minute % 10); clock[5] = 0;
+    date[0] = (char)('0' + t.day / 10); date[1] = (char)('0' + t.day % 10); date[2] = '/';
+    date[3] = (char)('0' + t.month / 10); date[4] = (char)('0' + t.month % 10); date[5] = '/';
+    utoa(t.year, date + 6, 10);
+}
+
+static void draw_pin_field(int cx, int y, int w)
+{
+    struct rect f = { cx - w / 2, y, w, 40 };
+    gfx_fill_rounded(back, f, 10, RGBA(255, 255, 255, 40));
+    gfx_rect(back, f, RGBA(255, 255, 255, 90));
+    int dots = pin_len, dw = 14;
+    int x = cx - dots * dw / 2 + dw / 2;
+    for (int i = 0; i < dots; i++, x += dw)
+        gfx_fill_rounded(back, (struct rect){ x - 4, y + 16, 8, 8 }, 4, C_TEXT_LIGHT);
+    if (!dots) {
+        const char *h = scr_state == SCR_SETUP_CONFIRM ? L(STR_SETUP_CONFIRM)
+                      : scr_state == SCR_SETUP ? L(STR_SETUP_TEXT) : L(STR_LOGIN_HINT);
+        gfx_text(back, cx - gfx_text_width(h) / 2, y + 12, h, RGBA(255, 255, 255, 130));
+    }
+}
+
+static void draw_lock(void)
+{
+    gfx_copy(back, 0, 0, wallpaper, (struct rect){ 0, 0, wallpaper->w, wallpaper->h });
+    gfx_fill_alpha(back, (struct rect){ 0, 0, screen->w, screen->h }, RGBA(0, 0, 0, 70));
+    char clock[8], date[12];
+    fmt_clock(clock, date);
+    int sc = screen->h >= 1000 ? 8 : 5;
+    int cx = screen->w / 2, y = screen->h / 4;
+    gfx_text_scaled(back, cx - (int)strlen(clock) * FONT_W * sc / 2 + 4, y + 4, sc, clock, RGBA(0, 0, 0, 120));
+    gfx_text_scaled(back, cx - (int)strlen(clock) * FONT_W * sc / 2, y, sc, clock, C_TEXT_LIGHT);
+    gfx_text_scaled(back, cx - (int)strlen(date) * FONT_W * 2 / 2, y + FONT_H * sc + 16, 2, date, RGBA(255, 255, 255, 200));
+    const char *h = L(STR_LOCK_HINT);
+    gfx_text(back, cx - gfx_text_width(h) / 2, screen->h - 80, h, RGBA(255, 255, 255, 160));
+}
+
+static void draw_login(void)
+{
+    gfx_copy(back, 0, 0, wallpaper, (struct rect){ 0, 0, wallpaper->w, wallpaper->h });
+    gfx_fill_alpha(back, (struct rect){ 0, 0, screen->w, screen->h }, RGBA(0, 0, 0, 150));
+    int cx = screen->w / 2, cy = screen->h / 2 - 60;
+    int av = 160;
+    gfx_fill_rounded(back, (struct rect){ cx - av / 2 - 6, cy - av / 2 - 6, av + 12, av + 12 }, (av + 12) / 2, RGBA(255, 255, 255, 40));
+    gfx_fill_rounded(back, (struct rect){ cx - av / 2, cy - av / 2, av, av }, av / 2, RGB(28, 30, 38));
+    draw_logo_centered(back, cx, cy, av * 3 / 4);
+    const char *name = scr_state == SCR_SETUP || scr_state == SCR_SETUP_CONFIRM ? L(STR_SETUP_TITLE) : "Nox";
+    gfx_text_scaled(back, cx - (int)strlen(name) * FONT_W * 2 / 2, cy + av / 2 + 24, 2, name, C_TEXT_LIGHT);
+    draw_pin_field(cx, cy + av / 2 + 24 + FONT_H * 2 + 24, 360);
+    int my = cy + av / 2 + 24 + FONT_H * 2 + 24 + 52;
+    if (login_msg)
+        gfx_text(back, cx - gfx_text_width(login_msg) / 2, my, login_msg, RGB(255, 120, 120));
+    else if (pin_len) {
+        const char *h = L(STR_ENTER_HINT);
+        gfx_text(back, cx - gfx_text_width(h) / 2, my, h, RGBA(255, 255, 255, 130));
+    }
+}
+
+static void present(void)
+{
+    if (screen->pitch == back->pitch)
+        memcpy(screen->pixels, back->pixels, (u32)screen->pitch * (u32)screen->h * 4u);
+    else
+        gfx_copy(screen, 0, 0, back, (struct rect){ 0, 0, back->w, back->h });
+    need_redraw = false;
+}
+
+static void enter_desktop(void)
+{
+    scr_state = SCR_DESKTOP;
+    pin_len = 0; login_msg = NULL;
+    need_redraw = true;
+    kprintf("desktop: session opened\n");
+    if (audio_available())
+        audio_play(SND_BOOT);
+}
+
+static void pin_key(char c)
+{
+    need_redraw = true;
+    if (c == '\n' || c == '\r') {
+        pin_buf[pin_len] = '\0';
+        if (scr_state == SCR_SETUP) {
+            if (pin_len < 4) { login_msg = L(STR_SETUP_SHORT); pin_len = 0; return; }
+            strcpy(pin_first, pin_buf); pin_len = 0; login_msg = NULL;
+            scr_state = SCR_SETUP_CONFIRM;
+        } else if (scr_state == SCR_SETUP_CONFIRM) {
+            if (strcmp(pin_first, pin_buf)) { login_msg = L(STR_SETUP_MISMATCH); pin_len = 0; scr_state = SCR_SETUP; return; }
+            strcpy(pin, pin_buf);
+            enter_desktop();
+        } else {
+            if (!strcmp(pin, pin_buf)) enter_desktop();
+            else { login_msg = L(STR_LOGIN_BAD); pin_len = 0; }
+        }
+        return;
+    }
+    if (c == 27) { pin_len = 0; login_msg = NULL; if (scr_state == SCR_LOGIN) scr_state = SCR_LOCK; return; }
+    if (c == 8 || c == 127) { if (pin_len) pin_len--; return; }
+    if (c >= 32 && pin_len < PIN_MAX) { pin_buf[pin_len++] = c; login_msg = NULL; }
+}
+
+/* /etc/nox.pin dans NoxFS = code deja choisi (sinon premier demarrage) */
+static void load_pin(void)
+{
+    pin[0] = '\0';
+    if (!fs_mounted())
+        return;
+    int idx = fs_lookup("/etc/nox.pin", 0);
+    if (idx < 0)
+        return;
+    u32 size;
+    char *f = fs_load(idx, &size);
+    if (!f)
+        return;
+    u32 n = 0;
+    while (n < size && n < PIN_MAX && f[n] > ' ')
+        n++;
+    memcpy(pin, f, n);
+    pin[n] = '\0';
+    kfree(f);
+}
+
+static void copy_msg(char *dst, const char *src)
+{
+    size_t n = strlen(src);
+    if (n >= MSG_MAX) n = MSG_MAX - 1;
+    memcpy(dst, src, n);
+    dst[n] = '\0';
+}
+
+static void draw_toast(void)
+{
+    int w = gfx_text_width(toast_text) + 48 + 44;
+    if (w < 320) w = 320;
+    if (w > screen->w - 40) w = screen->w - 40;
+    int h = 24 + FONT_H * 2 + 8;
+    int x = screen->w - w - 16;
+    int y = settings.taskbar_top ? TASKBAR_H + 16 : screen->h - TASKBAR_H - 16 - h;
+    struct rect r = { x, y, w, h };
+    gfx_fill_rounded(back, (struct rect){ x + 2, y + 4, w, h }, 14, C_SHADOW);
+    gfx_fill_rounded(back, r, 14, RGBA(30, 32, 42, 240));
+    gfx_rect(back, r, RGBA(255, 255, 255, 30));
+    if (logo_px)
+        gfx_draw_rgba_scaled(back, x + 14, y + (h - 28) / 2, 28, 28, logo_size, logo_size, logo_px);
+    gfx_text(back, x + 54, y + 12, toast_title, C_TEXT_LIGHT);
+    gfx_text(back, x + 54, y + 12 + FONT_H + 4, toast_text, RGBA(255, 255, 255, 150));
+}
+
+static void draw_error(void)
+{
+    int w = gfx_text_width(err_text) + 64 + 48;
+    if (w < 380) w = 380;
+    if (w > screen->w - 40) w = screen->w - 40;
+    int h = 24 + FONT_H + 12 + FONT_H + 28 + 36 + 20;
+    int x = (screen->w - w) / 2, y = (screen->h - h) / 2;
+    struct rect r = { x, y, w, h };
+    gfx_fill_alpha(back, (struct rect){ 0, 0, screen->w, screen->h }, RGBA(0, 0, 0, 90));
+    gfx_fill_rounded(back, (struct rect){ x + 3, y + 6, w, h }, 16, C_SHADOW);
+    gfx_fill_rounded(back, r, 16, RGBA(34, 30, 40, 248));
+    gfx_rect(back, r, RGBA(255, 90, 90, 90));
+    /* pastille d'erreur : disque rouge avec une croix */
+    int cx = x + 24, cy = y + 24;
+    gfx_fill_rounded(back, (struct rect){ cx, cy, 36, 36 }, 18, RGB(214, 64, 64));
+    gfx_text(back, cx + 18 - FONT_W / 2, cy + 18 - FONT_H / 2, "x", C_TEXT_LIGHT);
+    gfx_text(back, x + 72, y + 24, err_title, C_TEXT_LIGHT);
+    gfx_text(back, x + 72, y + 24 + FONT_H + 12, err_text, RGBA(255, 255, 255, 170));
+    err_ok_rect = (struct rect){ x + w - 24 - 110, y + h - 20 - 36, 110, 36 };
+    wm_draw_button(back, err_ok_rect, L(STR_OK), rect_contains(err_ok_rect, hover_x, hover_y));
+}
+
+static void compose(void)
+{
+    int mx, my;
+    mouse_state(&mx, &my, NULL);
+
+    gfx_copy(back, 0, 0, wallpaper, (struct rect){ 0, 0, wallpaper->w, wallpaper->h });
+    for (struct window *w = windows; w; w = w->next) {
+        if (w->dirty && w->paint) {
+            w->paint(w);
+            w->dirty = false;
+        }
+        draw_window(w);
+    }
+    draw_taskbar();
+    if (menu_open)
+        draw_menu();
+    if (search_open)
+        draw_search();
+    if (toast_until)
+        draw_toast();
+    if (err_open)
+        draw_error();
+    draw_cursor(mx, my);
+
+    present();
+}
+
+/* --------------------------------------------------------------------------
+ * Entree
+ * ------------------------------------------------------------------------ */
+static struct window *window_at(int x, int y)
+{
+    struct window *hit = NULL;
+    for (struct window *w = windows; w; w = w->next)
+        if (rect_contains(w->frame, x, y))
+            hit = w;             /* le dernier trouve est le plus haut */
+    return hit;
+}
+
+static void send(struct window *w, struct wm_event ev)
+{
+    if (w && w->event)
+        w->event(w, &ev);
+}
+
+static void menu_action(int action)
+{
+    if (action == -1) {          /* champ de recherche du menu -> recherche */
+        menu_open = false; search_open = true; search_update(); need_redraw = true;
+        return;
+    }
+    if (action == 0) return;
+    menu_open = false;
+    recent_push(action);
+    switch (action) {
+    case 1: app_open_explorer(NULL); break;
+    case 2: app_open_terminal(); break;
+    case 3: app_open_settings(); break;
+    case 4: app_open_taskmgr(); break;
+    case 5: app_open_about(); break;
+    case 6: desktop_reboot(); break;
+    case 7: desktop_shutdown(); break;
+    default: break;
+    }
+    need_redraw = true;
+}
+
+static void dock_click(enum app_icon icon, struct window *win)
+{
+    if (icon == ICON_NOX) { menu_open = !menu_open; search_open = false; need_redraw = true; return; }
+    if (win) { wm_focus(win); return; }
+    switch (icon) {
+    case ICON_EXPLORER: recent_push(1); app_open_explorer(NULL); break;
+    case ICON_TERMINAL: recent_push(2); app_open_terminal(); break;
+    case ICON_SETTINGS: recent_push(3); app_open_settings(); break;
+    case ICON_TASKMGR:  recent_push(4); app_open_taskmgr(); break;
+    default: break;
+    }
+}
+
+static void handle_mouse(const struct mouse_event *m)
+{
+    hover_x = m->x; hover_y = m->y;
+    need_redraw = true;
+
+    if (m->type == MOUSE_MOVE) {
+        if (drag_win) {
+            drag_win->frame.x = m->x - drag_dx;
+            drag_win->frame.y = m->y - drag_dy;
+            return;
+        }
+        struct window *w = window_at(m->x, m->y);
+        if (w && (w == focused || w->popup))
+            send(w, (struct wm_event){ WM_MOUSE_MOVE, m->x - w->frame.x,
+                                       m->y - w->frame.y - WM_TITLE_H, m->buttons, 0 });
+        return;
+    }
+
+    if (m->type == MOUSE_UP) {
+        if (drag_win && m->button == MOUSE_LEFT)
+            drag_win = NULL;
+        struct window *w = window_at(m->x, m->y);
+        if (w)
+            send(w, (struct wm_event){ WM_MOUSE_UP, m->x - w->frame.x,
+                                       m->y - w->frame.y - WM_TITLE_H, m->button, 0 });
+        return;
+    }
+
+    /* MOUSE_DOWN */
+    if (err_open) {
+        if (rect_contains(err_ok_rect, m->x, m->y))
+            err_open = false;
+        return;
+    }
+    if (menu_open) {
+        if (rect_contains(menu_rect, m->x, m->y)) {
+            menu_action(menu_hit(m->x, m->y));
+            return;
+        }
+        menu_open = false;
+    }
+    if (search_open) {
+        if (rect_contains(search_panel, m->x, m->y)) {
+            int i = search_hit(m->x, m->y);
+            if (i >= 0) search_open_result(&search_results[i]);
+            return;
+        }
+        if (!rect_contains(search_rect, m->x, m->y))
+            search_open = false;
+    }
+    if (rect_contains(search_rect, m->x, m->y)) {
+        search_open = true;
+        menu_open = false;
+        search_update();
+        return;
+    }
+    for (int i = 0; i < dock_count; i++)
+        if (rect_contains(dock_items[i].r, m->x, m->y)) {
+            dock_click(dock_items[i].icon, dock_items[i].win);
+            return;
+        }
+    int bar_y = settings.taskbar_top ? 0 : screen->h - TASKBAR_H;
+    if (m->y >= bar_y && m->y < bar_y + TASKBAR_H)
+        return;
+
+    struct window *w = window_at(m->x, m->y);
+    /* popup ouvert et clic ailleurs : on le ferme */
+    for (struct window *t = windows; t; ) {
+        struct window *n = t->next;
+        if (t->popup && t != w)
+            wm_destroy(t);
+        t = n;
+    }
+    if (!w)
+        return;
+    wm_focus(w);
+    int ly = m->y - w->frame.y;
+    if (!w->popup && ly < WM_TITLE_H) {
+        /* pastille rouge = fermer */
+        if (rect_contains((struct rect){ w->frame.x + 8, w->frame.y + 4, 20, WM_TITLE_H - 8 }, m->x, m->y)
+            && m->button == MOUSE_LEFT) {
+            wm_destroy(w);
+            return;
+        }
+        if (m->button == MOUSE_LEFT) {
+            drag_win = w;
+            drag_dx = m->x - w->frame.x;
+            drag_dy = m->y - w->frame.y;
+        }
+        return;
+    }
+    u32 now = timer_ticks();
+    bool dbl = m->button == MOUSE_LEFT &&
+               (now - last_click_tick) * (1000 / TIMER_HZ) < DBLCLICK_MS &&
+               (m->x - last_click_x) * (m->x - last_click_x) + (m->y - last_click_y) * (m->y - last_click_y) < 64;
+    last_click_tick = now; last_click_x = m->x; last_click_y = m->y;
+    send(w, (struct wm_event){ dbl ? WM_MOUSE_DBLCLICK : WM_MOUSE_DOWN,
+                               m->x - w->frame.x, ly - WM_TITLE_H, m->button, 0 });
+}
+
+/* --------------------------------------------------------------------------
+ * Thread du bureau
+ * ------------------------------------------------------------------------ */
+static void load_logo(void)
+{
+    if (!fs_mounted())
+        return;
+    int idx = fs_lookup("/sys/logo.rgba", 0);
+    if (idx < 0)
+        return;
+    u32 size;
+    u32 *px = fs_load(idx, &size);
+    if (!px)
+        return;
+    /* image carree sans en-tete : cote = sqrt(size / 4) */
+    int side = 1;
+    while ((u32)(side + 1) * (u32)(side + 1) * 4u <= size)
+        side++;
+    if ((u32)side * (u32)side * 4u != size) {
+        kfree(px);
+        return;
+    }
+    logo_px = px;
+    logo_size = side;
+}
+
+static void desktop_thread(void *arg)
+{
+    (void)arg;
+    u32 last_tick = timer_ticks();
+    running = true;
+    console_grab_keyboard(true);
+    load_pin();
+    scr_state = pin[0] ? SCR_LOCK : SCR_SETUP;
+    need_redraw = true;
+
+    for (;;) {
+        struct mouse_event m;
+        char c;
+
+        if (scr_state != SCR_DESKTOP) {
+            while (mouse_poll_event(&m)) {
+                need_redraw = true;
+                if (m.type == MOUSE_DOWN && scr_state == SCR_LOCK) scr_state = SCR_LOGIN;
+            }
+            while (keyboard_poll(&c)) {
+                if (scr_state == SCR_LOCK) { scr_state = SCR_LOGIN; need_redraw = true; continue; }
+                pin_key(c);
+            }
+            u32 t = timer_ticks();
+            if (t - last_tick >= TIMER_HZ / 2) { last_tick = t; need_redraw = true; }
+            if (need_redraw && scr_state != SCR_DESKTOP) {
+                if (scr_state == SCR_LOCK) draw_lock(); else draw_login();
+                int mx, my; mouse_state(&mx, &my, NULL);
+                draw_cursor(mx, my);
+                present();
+            }
+            thread_sleep_ms(16);
+            continue;
+        }
+
+        while (mouse_poll_event(&m))
+            handle_mouse(&m);
+
+        while (keyboard_poll(&c)) {
+            if (err_open) { if (c == 27 || c == '\n' || c == '\r') { err_open = false; need_redraw = true; } continue; }
+            if (menu_open && c == 27) { menu_open = false; need_redraw = true; continue; }
+            if (menu_open && c >= 32) { menu_open = false; search_open = true; search_len = 0; search_key(c); continue; }
+            if (search_open) { search_key(c); continue; }
+            if (!focused) { console_inject(c); continue; }   /* bureau vide : shell noyau */
+            send(focused, (struct wm_event){ WM_KEY, 0, 0, 0, c });
+            need_redraw = true;
+        }
+
+        u32 now = timer_ticks();
+        if (toast_until && (i32)(now - toast_until) >= 0) { toast_until = 0; need_redraw = true; }
+        if (now - last_tick >= TIMER_HZ / 2) {
+            last_tick = now;
+            for (struct window *w = windows; w; w = w->next)
+                send(w, (struct wm_event){ WM_TICK, 0, 0, 0, 0 });
+            need_redraw = true;         /* horloge */
+        }
+
+        if (need_redraw)
+            compose();
+        thread_sleep_ms(16);
+    }
+}
+
+bool desktop_start(void)
+{
+    if (running)
+        return true;
+    screen = fb_surface();
+    if (!screen) {
+        kprintf("desktop: no framebuffer (VBE mode not available)\n");
+        return false;
+    }
+    back = surface_create(screen->w, screen->h);
+    wallpaper = surface_create(screen->w, screen->h);
+    if (!back || !wallpaper) {
+        kprintf("desktop: out of memory\n");
+        return false;
+    }
+    if (!logo_px)
+        load_logo();
+    if (settings.wallpaper_auto) {
+        /* rotation "a chaque demarrage" : la seconde RTC sert de graine */
+        struct rtc_time t;
+        rtc_read(&t);
+        settings.wallpaper = (t.second + t.minute + t.day) % WALLPAPER_COUNT;
+    }
+    build_wallpaper();
+    thread_create("desktop", desktop_thread, NULL);
+    return true;
+}
+
+bool desktop_running(void) { return running; }
+struct desktop_settings *desktop_settings(void) { return &settings; }
+
+void desktop_settings_changed(void)
+{
+    struct rect wa = wm_workarea();
+    for (struct window *w = windows; w; w = w->next) {
+        if (w->frame.y < wa.y) w->frame.y = wa.y + 8;
+        if (w->frame.y + w->frame.h > wa.y + wa.h) w->frame.y = wa.y + wa.h - w->frame.h - 8;
+    }
+    need_redraw = true;
+}
+
+void desktop_lang_changed(void)
+{
+    for (struct window *w = windows; w; w = w->next) {
+        send(w, (struct wm_event){ WM_LANG, 0, 0, 0, 0 });
+        w->dirty = true;
+    }
+    need_redraw = true;
+}
+
+void desktop_reboot(void)
+{
+    kprintf("desktop: reboot\n");
+    outb(0x64, 0xFE);                 /* 8042 : impulsion reset */
+    for (;;) hlt();
+}
+
+void desktop_notify(const char *title, const char *text)
+{
+    copy_msg(toast_title, title ? title : L(STR_NOTIF_TITLE));
+    copy_msg(toast_text, text ? text : "");
+    toast_until = timer_ticks() + TOAST_MS / (1000 / TIMER_HZ);
+    if (!toast_until) toast_until = 1;
+    need_redraw = true;
+    if (audio_available())
+        audio_play(SND_NOTIFY);
+}
+
+void desktop_error(const char *title, const char *text)
+{
+    copy_msg(err_title, title ? title : L(STR_ERROR_TITLE));
+    copy_msg(err_text, text ? text : "");
+    err_open = true;
+    need_redraw = true;
+    if (audio_available())
+        audio_play(SND_ERROR);
+}
+
+void desktop_shutdown(void)
+{
+    kprintf("desktop: power off\n");
+    outw(0x604, 0x2000);              /* QEMU (ACPI PM1a) */
+    outw(0xB004, 0x2000);             /* Bochs / anciens QEMU */
+    outw(0x4004, 0x3400);             /* VirtualBox */
+    gfx_fill(screen, (struct rect){ 0, 0, screen->w, screen->h }, C_BG_DARK);
+    const char *msg = lang_get() == LANG_FR ? "Vous pouvez \xE9teindre l'ordinateur." : "You can now turn off the computer.";
+    gfx_text(screen, (screen->w - gfx_text_width(msg)) / 2, screen->h / 2, msg, C_TEXT_LIGHT);
+    cli();
+    for (;;) hlt();
+}

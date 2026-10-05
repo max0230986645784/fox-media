@@ -59,6 +59,8 @@ static void buffer_push(char c)
 static void keyboard_irq(struct registers *regs)
 {
     (void)regs;
+    if (inb(KBD_STATUS) & 0x20)     /* octet destine au pilote souris */
+        return;
     u8 sc = inb(KBD_DATA);
 
     if (sc == 0xE0) {

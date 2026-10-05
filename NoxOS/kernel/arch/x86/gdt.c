@@ -1,12 +1,16 @@
-/* NoxOS - GDT du kernel
+/* NoxOS - GDT du kernel + TSS
  *
  * Le bootloader a installe une GDT temporaire dans sa propre memoire
  * (0x7E00). Le kernel en installe une a lui pour ne plus dependre du
  * bootloader. Modele memoire "plat" : code et data couvrent 0..4 Go.
- * Les segments utilisateur (ring 3) sont deja prevus pour les versions
- * futures mais ne sont pas encore utilises.
+ *
+ * Le TSS (Task State Segment) n'est pas utilise pour le multitache
+ * materiel : le CPU s'en sert uniquement pour trouver la pile kernel
+ * (ss0:esp0) quand une interruption ou un `int 0x80` survient pendant
+ * que le processeur est en ring 3.
  */
 #include <nox/gdt.h>
+#include <nox/string.h>
 
 struct gdt_entry {
     u16 limit_low;
@@ -22,10 +26,23 @@ struct gdt_ptr {
     u32 base;
 } __attribute__((packed));
 
-#define GDT_ENTRIES 5
+struct tss {
+    u32 prev_task;
+    u32 esp0, ss0;
+    u32 esp1, ss1;
+    u32 esp2, ss2;
+    u32 cr3, eip, eflags;
+    u32 eax, ecx, edx, ebx, esp, ebp, esi, edi;
+    u32 es, cs, ss, ds, fs, gs;
+    u32 ldt;
+    u16 trap, iomap_base;
+} __attribute__((packed));
+
+#define GDT_ENTRIES 6
 
 static struct gdt_entry gdt[GDT_ENTRIES];
 static struct gdt_ptr   gdt_pointer;
+static struct tss       tss;
 
 extern void gdt_flush(u32 gdt_ptr_addr);
 
@@ -45,10 +62,23 @@ void gdt_init(void)
     gdt_set(0, 0, 0, 0, 0);                    /* nul */
     gdt_set(1, 0, 0xFFFFF, 0x9A, 0xC0);        /* 0x08 kernel code */
     gdt_set(2, 0, 0xFFFFF, 0x92, 0xC0);        /* 0x10 kernel data */
-    gdt_set(3, 0, 0xFFFFF, 0xFA, 0xC0);        /* 0x18 user code (futur) */
-    gdt_set(4, 0, 0xFFFFF, 0xF2, 0xC0);        /* 0x20 user data (futur) */
+    gdt_set(3, 0, 0xFFFFF, 0xFA, 0xC0);        /* 0x18 user code (DPL 3) */
+    gdt_set(4, 0, 0xFFFFF, 0xF2, 0xC0);        /* 0x20 user data (DPL 3) */
+
+    memset(&tss, 0, sizeof(tss));
+    tss.ss0 = GDT_KERNEL_DATA;
+    tss.iomap_base = sizeof(tss);              /* pas de bitmap d'E/S */
+    /* 0x89 = present, DPL 0, TSS 32 bits disponible ; granularite octet */
+    gdt_set(5, (u32)&tss, sizeof(tss) - 1, 0x89, 0x00);
 
     gdt_pointer.limit = sizeof(gdt) - 1;
     gdt_pointer.base  = (u32)&gdt;
     gdt_flush((u32)&gdt_pointer);
+
+    __asm__ volatile ("ltr %%ax" : : "a"((u16)GDT_TSS));
+}
+
+void tss_set_kernel_stack(u32 esp0)
+{
+    tss.esp0 = esp0;
 }

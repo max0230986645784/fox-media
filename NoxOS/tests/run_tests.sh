@@ -7,6 +7,8 @@
 #    - que le clavier PS/2 fonctionne (touches envoyees via le moniteur QEMU)
 #    - que le shell repond a des commandes envoyees par le port serie
 #    - v0.2 : PMM, pagination, tas (heaptest), threads preemptifs (spawn/ps)
+#    - v0.3 : disque ATA + NoxFS (disk/ls/cat), processus ring 3 (run),
+#             appels systeme, isolation (un programme fautif est tue seul)
 #  Toute la sortie du kernel (VGA = serie) est enregistree dans
 #  build/test-serial.log puis analysee.
 #
@@ -36,7 +38,13 @@ serial_send() {
 # Le script ci-dessous alimente le moniteur QEMU (stdin) et, en parallele,
 # le port serie.
 (
-    sleep 3                                     # temps de boot
+    sleep 7                                     # boot + ecran de demarrage (3 s)
+    # premier demarrage : choix du code Nox (1234) puis confirmation
+    for k in 1 2 3 4 ret 1 2 3 4 ret; do
+        echo "sendkey $k"
+        sleep 0.15
+    done
+    sleep 1
     for k in v e r s i o n ret; do              # clavier PS/2 virtuel
         echo "sendkey $k"
         sleep 0.15
@@ -50,11 +58,26 @@ serial_send() {
     serial_send "spawn 3"
     sleep 3                                     # les threads demo tournent
     serial_send "ps"
+    serial_send "disk"
+    serial_send "ls /etc"
+    serial_send "cat /etc/nox-release"
+    serial_send "run hello"
+    sleep 1
+    serial_send "frames"
+    serial_send "run crash"
+    sleep 1.5
+    serial_send "run privileged"
+    serial_send "procs"
+    serial_send "frames"
+    serial_send "play error"
+    sleep 2.5
+    serial_send "play nothing.wav"
+    serial_send "ps"
     exec 3>&-
     echo "quit"
-) | timeout 40 "$QEMU" \
+) | timeout 50 "$QEMU" \
     -drive file="$IMAGE",format=raw,if=ide -m 64M -no-reboot \
-    -display none -monitor stdio \
+    -display none -monitor stdio -audiodev none,id=snd0 -device AC97,audiodev=snd0 \
     -chardev socket,id=ser0,host=127.0.0.1,port="$PORT",server=on,wait=off,logfile="$LOG" \
     -serial chardev:ser0 >/dev/null 2>&1
 
@@ -68,23 +91,61 @@ check() {
     fi
 }
 
-echo "NoxOS v0.2 boot tests"
+echo "NoxOS v0.3 boot tests"
 check "NOXOS KERNEL v"                     "kernel banner printed"
 check "System initialized successfully."   "kernel init completed"
 check "E820 entries:"                      "memory map received from bootloader"
-check "nox> version"                       "PS/2 keyboard input reaches the shell"
-check "NoxOS 0.2.0 - Built from scratch."  "'version' command works"
+check "desktop: session opened"            "first-boot code setup + login screen accepted the code"
+check_line() {
+    # ligne entiere (l'echo clavier "version" suit le message "session opened"
+    # qui a coupe l'invite)
+    if tr -d "\r" < "$LOG" 2>/dev/null | grep -qxF -- "$1"; then
+        echo "  [PASS] $2"
+    else
+        echo "  [FAIL] $2  (expected line: '$1')"
+        fail=1
+    fi
+}
+check_line "version"                        "PS/2 keyboard input reaches the shell"
+check "NoxOS 0.3.0 - Built from scratch."  "'version' command works"
 check "list available commands"            "'help' via serial works"
 check "serial ok"                          "'echo' via serial works"
 check "Total usable :"                     "'memory' command works"
 check "[init] paging"                      "paging enabled at boot"
 check "Frames (4 KB):"                     "physical frame allocator reports stats"
 check "heap test ok"                       "kmalloc/kfree/aligned + integrity check"
-check "spawned thread 5 'demo-02'"         "3 kernel threads created"
+check "spawned thread 7 'demo-02'"         "3 kernel threads created"
 check "[demo-00] step 1/3"                 "thread demo-00 ran (preempted shell)"
 check "[demo-02] finished"                 "threads sleep/wake and exit"
-check "2 threads:"                         "finished threads were reaped (ps)"
+check "4 threads:"                         "finished threads were reaped (ps, main+idle+desktop+audio)"
 check "main"                               "'ps' lists the main thread"
+check "ata0: QEMU HARDDISK"                "ATA PIO disk detected"
+check "noxfs: 'NoxOS' mounted"             "NoxFS volume mounted at boot"
+check "NoxFS    : 'NoxOS' v1 at LBA 2048"  "'disk' command works"
+check "nox-release"                        "'ls /etc' lists files"
+check "VERSION=0.3"                        "'cat' reads a file from NoxFS"
+check "Bonjour depuis le ring 3 ! pid=1"   "user program runs in ring 3 (SYS_WRITE, SYS_GETPID)"
+check "hello: tick 3"                      "SYS_SLEEP + preemption from ring 3"
+check "[pid 1 exited with code 42]"        "SYS_EXIT code returned to the shell"
+check "Page fault in pid 2 (crash)"        "page fault in ring 3 kills only the process"
+check "[pid 2 exited with code -1]"        "crashed process reaped, shell alive"
+check "General protection fault in pid 3"  "privileged instruction in ring 3 -> GPF -> killed"
+check "0 running process(es):"             "all processes terminated (procs)"
+check "AC'97 pci 8086:2415 ready"          "PCI scan + AC'97 audio controller initialized"
+check "playing on AC'97"                   "'play error' loads WAV from NoxFS and starts DMA"
+check "play: cannot play 'nothing.wav'"    "missing sound file rejected cleanly"
+check "audio"                              "audio thread alive after playback (ps)"
+
+# Fuite memoire : 'frames' avant et apres deux processus tues doit donner
+# exactement la meme ligne (pages, tables et repertoire rendus au PMM).
+if [ "$(grep -c '^frames used:' "$LOG")" -eq 2 ] && \
+   [ "$(grep '^frames used:' "$LOG" | uniq | wc -l)" -eq 1 ]; then
+    echo "  [PASS] no frame leak after process exit"
+else
+    echo "  [FAIL] frame count changed after processes exited"
+    grep '^frames used:' "$LOG"
+    fail=1
+fi
 
 if grep -q "KERNEL PANIC" "$LOG" 2>/dev/null; then
     echo "  [FAIL] kernel panic detected"

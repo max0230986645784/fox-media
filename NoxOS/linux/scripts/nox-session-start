@@ -1,0 +1,7 @@
+#!/bin/sh
+# Lance au demarrage de la session Nox : premiere configuration puis son de demarrage.
+if [ ! -f /var/lib/nox/firstboot-done ]; then
+    /usr/lib/nox/nox-firstboot.py
+fi
+sleep 1
+/usr/bin/nox-sound boot &

@@ -1,0 +1,17 @@
+{
+    "KPackageStructure": "Plasma/Applet",
+    "KPlugin": {
+        "Authors": [ { "Name": "Nox OS" } ],
+        "Category": "Application Launchers",
+        "Description": "Menu Nox plein ecran (Launchpad)",
+        "Icon": "/usr/share/nox/logo.png",
+        "Id": "org.kde.plasma.kickerdash",
+        "License": "GPL-2.0+",
+        "Name": "Menu Nox",
+        "Version": "1.0"
+    },
+    "X-Plasma-API": "declarativeappletscript",
+    "X-Plasma-MainScript": "ui/main.qml",
+    "X-Plasma-Provides": [ "org.kde.plasma.launchermenu" ],
+    "X-Plasma-RootPath": "org.kde.plasma.kicker"
+}
